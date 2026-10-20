@@ -768,6 +768,24 @@ rollback;
 - `AC-10.1` The full gate is green. **Verify:** the full local gate command sequence → every step exits 0.
 - `AC-10.2` The human steps are documented. **Inspect:** `README.md` contains `supabase db push`, `Confirm signup`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` and `Do not add a service-role or secret key`.
 
+### Task 11: Typography — IBM Plex Sans  `[mechanical]`
+
+Follow-up added after the run, on the short path and approved by the human. It replaces the scaffold's Arial, which the design hook flagged as an overused font.
+
+**Files:** modify `app/layout.tsx`, `app/globals.css`, and the number elements in `app/(app)/page.tsx` and `app/(app)/history/page.tsx` (class names only).
+
+**Steps:**
+- [ ] Load `IBM_Plex_Sans` via `next/font/google` in `app/layout.tsx`: weights 400, 500 and 600, `subsets: ["latin"]`, `display: "swap"`, exposed as the CSS variable `--font-plex-sans` on `<html>`.
+- [ ] In `app/globals.css`, replace the `font-family: Arial…` declaration with `var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif`. If the Tailwind theme defines a sans font token, point it at the same variable.
+- [ ] Apply `tabular-nums` (Tailwind) to the numeric displays only: the Today totals, the remaining figures and the progress labels, and the History per-day totals. Change no copy, colour or layout.
+
+**Acceptance criteria:**
+- `AC-11.1` The font is self-hosted and applied. **Verify:** `npm run build` exits 0. `grep -rn "fonts.googleapis\|fonts.gstatic" .next/static app` finds nothing. The computed `font-family` of `body` on `/login` starts with the Plex family (Playwright `evaluate`).
+- `AC-11.2` Nothing else regressed. **Verify:** lint, typecheck, `npm test` and the full `npx playwright test` all exit 0. At 320px, `/`, `/log`, `/settings` and `/history` have `scrollWidth` 320. No copy string changed (`git diff` touches no text nodes).
+- `AC-11.3` The numbers are tabular. **Inspect:** the Today and History numeric elements carry `tabular-nums`, and no non-numeric text does.
+
+**FC:** FC-14, FC-19, FC-20.
+
 ---
 
 ## Human-only steps (not done by Engineer or QA)
