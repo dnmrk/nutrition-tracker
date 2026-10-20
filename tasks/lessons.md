@@ -51,3 +51,15 @@
 - **What happened:** QA left `.orchestrate/probe/*.test.ts`, which vitest and eslint picked up. That broke lint and inflated the test count (52 vs 31, 94 vs 69).
 - **Rule:** probes run from stdin or outside the repo. Consider excluding `.orchestrate/` in the vitest and eslint configs.
 - **Check:** `git status --porcelain --ignored .orchestrate` after each QA pass.
+
+## 2026-10-20 — today-macro-rings
+
+### Exact-match displayed numbers that could carry a sign
+- **What happened:** the "100 kcal over" e2e used substring `getByText`, so dropping `Math.abs(left)` rendered "-100 kcal over" and the test still passed. Only whole-branch QA's mutation run caught it.
+- **Rule:** assert displayed numbers and copy with `getByText(..., { exact: true })` or an anchored regex whenever a sign, prefix or unit could leak in.
+- **Check:** a mutation that drops the abs/format step turns the test RED.
+
+### Mutation and RED runs happen in a scratch copy, not the main tree
+- **What happened:** Task 6 QA was BLOCKED: the permission classifier denied temporarily checking out an old project file to see the tests fail. A `git worktree` couldn't serve Next (ENOENT on `.next`).
+- **Rule:** QA does FC-25/26 runs in an `rsync` copy under `.orchestrate/<slug>/scratch/`, with `node_modules` symlinked and its own port (e.g. 3100), then removes it. Briefs for test-bearing UI tasks say so up front.
+- **Check:** after each QA pass, `git status --porcelain` is empty and `scratch/` is gone.

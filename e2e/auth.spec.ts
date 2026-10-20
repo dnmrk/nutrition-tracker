@@ -23,6 +23,7 @@ test("a bad link shows the invalid-link copy", async ({ page }) => {
 
 test("sign out returns to /login", async ({ page }) => {
   await signIn(page);
+  await page.goto("/settings");
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page).toHaveURL("/login");
   await page.goto("/");

@@ -1,892 +1,411 @@
-# NutritionTracker MVP — plan
+# Today screen: macro rings, week strip, meals list, bottom tab bar — plan
 
-**Request:** "review @perplexity.txt"
-Scope as clarified by the human: critique the guide at `perplexity.txt`, then plan an MVP built from it. The MVP covers:
-- Supabase magic-link auth with protected routes;
-- daily targets in settings;
-- photo meal logging via `/api/analyze` (a vision model: **Groq instead of Claude**, per revision 1, see G13);
-- editable AI estimates before saving;
-- today's totals on the dashboard;
-- a history view.
+**Request:** (verbatim from `.orchestrate/today-macro-rings/request.md`)
 
-Out of scope (deferred): pantry, barcode/label scanning, charts, body weight, reminders, Stripe and the scan limits.
-
-**Revision 1 (human):**
-- Replace Anthropic with Groq: free tier, Groq's best vision model.
-- Photos: don't store them (former OQ2, now decided).
-- Editing or deleting a saved meal: deferred (former OQ3, now decided).
-
-**Branch:** `feat/nutrition-mvp`   **Base:** `main` (no remote yet)
-
-> Greenfield repo: only `perplexity.txt` plus two commits. There is no CI config, `CLAUDE.md`, `AGENTS.md`, `README` or `tasks/lessons.md` in the repo, so this plan defines the verification commands and Task 1 adds them as npm scripts.
+> Redesign the NutritionTracker "Today" screen (app/(app)/page.tsx) with three concentric macro rings, a week strip and a meals list, as a 100dvh mobile column (max-width 430px, centered on larger screens) with a bottom tab bar.
 >
-> The global CLAUDE.md rule "run PHP/Composer inside `docker compose exec`" is Shopware-specific and does not apply here. This is a Node app: Node commands run on the host (Node v22.23.1, npm 10.9.8). Supabase runs in Docker through the Supabase CLI (Docker 29.4.0 is running).
+> Stack (no new dependencies): Next.js 16.4.2 App Router, React 19.3, TypeScript, Tailwind v4 (colors as tokens in app/globals.css under @theme, light and dark; no hex literals in components), IBM Plex Sans with tabular numerals, Supabase via @supabase/ssr (requireUser/getToday from lib/supabase/server, sumItems/fmt from lib/nutrition). The page stays a Server Component that loads data; the interactive parts are small client components: TodayScreen (server), WeekStrip, MacroRings, MealList (client). Read node_modules/next/dist/docs/ before writing code (per AGENTS.md).
 >
-> Precedent: there is no in-repo precedent. The shapes to follow are the `create-next-app@16.4.2` `app-tw` template and Supabase's Next.js SSR guide (`@supabase/ssr`, `proxy.ts`, `getClaims`).
+> Data: one query loads the meals for the last 7 days ending today in the user's time zone (eaten_on between start and today), plus daily_targets. Switching days happens on the client with no refetch. With no targets set, the rings show tracks only and the legend links to "Set your daily targets" (/settings).
+>
+> Header: eyebrow "NutritionTracker", large title "Today" (32px/700) and an initials avatar from the user's email.
+>
+> Week strip: a 7-column grid on a soft pill track, each day a 62px button with a weekday letter, the date number and a small dot when that day's calories landed within 90–110% of calorie_target. ONE shared highlight (an absolutely positioned accent gradient pill, width calc((100% - 8px) / 7)) slides between days with transform: translateX(index * 100%) on a spring (CSS linear() curve, 590ms); the selected day's text turns white. Today is selected by default.
+>
+> Rings card: a 160px SVG with three circles per ring (a faint track and a progress circle) at radii 72, 53 and 34, stroke-width 15, round caps, rotated -90deg, in three steps of the accent blue: Protein (outer), Carbs (middle), Fat (inner). Total kcal sits in the center of the rings. Each progress circle uses pathLength="1", stroke-dasharray: 1 and stroke-dashoffset = 1 - min(1, eaten / target), with transition: stroke-dashoffset 1.1s cubic-bezier(.32,.72,0,1); a 0 g target counts as full only when eaten is 0. Beside it a legend with Protein (g), Carbs (g) and Fat (g): label, 26px tabular number that counts to the new value over 900ms (requestAnimationFrame) and "/ <target> g" in muted text, plus "<n> kcal left" or "<n> kcal over".
+>
+> Below, a "Meals" list: 46px icon tile (first letter of the first item), the item names joined by ", " (wrapping long names), "<n> items · <kcal> kcal" and the logged time in the user's time zone. Rows re-render with a 60ms stagger (opacity 0 and translateY(10px) to rest) when the day changes. Empty state: "No meals logged on this day." with a "Snap meal" link to /log.
+>
+> Bottom tab bar (replaces the header nav in app/(app)/layout.tsx, so it appears on every signed-in screen): Today, Log, History, Settings as links with aria-current="page" on the active one. Sign out moves to the Settings page.
+>
+> Accessibility and motion: each day button is a real button with aria-pressed and an aria-label with the full date; arrow keys move between days (Home and End jump to the ends, roving tabindex). The rings have role="img" with a text summary. prefers-reduced-motion removes the stagger and the count-up and shortens the ring fill to 200ms. No horizontal scroll at 320px wide.
+>
+> Tests: Vitest for the pure helpers (ring offset clamping, 7-day window across a time-zone boundary, the 90–110% goal-met rule); Playwright e2e for day switching, keyboard navigation, aria-pressed, and the empty state. Lint, typecheck, test and e2e all pass.
 
----
+**Branch:** `feat/today-macro-rings`   **Base:** `main` (73bcf87)
 
-## Guide critique (perplexity.txt)
+> Node app: every command runs on the **host** in `/Users/dnmrk/Sites/nutrition-tracker` (the global "docker compose exec" rule is Shopware-only). Supabase runs in Docker via the CLI. There is no CI config; the verification commands come from `README.md` "Full local gate" and the previous plan.
+>
+> Precedents: data loading and error contract follow the current `app/(app)/page.tsx` and `app/(app)/history/page.tsx`; per-day grouping reuses `groupByDay` in `lib/nutrition.ts`; colocated client components follow `app/(app)/settings/targets-form.tsx`; theme tokens follow the existing `:root` vars + `@theme inline` + `prefers-color-scheme` block in `app/globals.css`; the e2e PostgREST session helper follows `userMeals()` in `e2e/log-meal.spec.ts`; page unit tests follow `app/pages.test.ts`.
+>
+> Next 16 docs read: `01-app/03-api-reference/04-functions/use-pathname.md` (Client-only hook, needed for `aria-current` because a Server layout cannot read the URL; `cacheComponents` is off in this repo, so no Suspense is needed), `01-app/01-getting-started/04-linking-and-navigating.md`, `05-server-and-client-components.md`. Engineers still read the docs for anything else they touch.
 
-Each row says where the guide is wrong, outdated or risky, and how this plan corrects it.
+### Architect's calls (decisions the request leaves open)
 
-| # | Guide says | Problem | Plan does |
-|---|---|---|---|
-| G1 | "Next.js 14" | Outdated: the current release is Next 16.4.2. Next 16 renamed `middleware.ts` to `proxy.ts` and runs it on Node. The 16.4.2 scaffold also turns on `cacheComponents` by default, which forces every cookie or auth read into `<Suspense>`. On a fresh checkout, `tsc --noEmit` fails (`LayoutProps` not found) until `next typegen` runs. All of this was dry-run here. | Next 16.4.2, React 19.3, TypeScript ^5 (5.9.3). We don't use TypeScript 7.0.2, because Next 16's default type checker can't load TS 7 without the experimental `useTypeScriptCli`. Scaffold with `--no-cache-components`. The typecheck script is `next typegen && tsc --noEmit`. |
-| G2 | "Supabase auth" (no package named) | The legacy `@supabase/auth-helpers-nextjs` is deprecated. Supabase now issues publishable keys (`sb_publishable_…`), not just the anon JWT. `getSession()` must not be trusted on the server. A PKCE `?code=` magic link breaks when the email opens in a different browser than the one that requested it (for example a mail app's in-app browser). | `@supabase/ssr@0.12.7` + `@supabase/supabase-js@2.118.0`. Env var `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`. `proxy.ts` and every Server Function/route call `auth.getClaims()`. The magic link uses `token_hash` → `/auth/confirm` → `verifyOtp({ type: 'email', token_hash })`, which works cross-browser. Both the "Magic Link" and "Confirm signup" email templates are changed (human step H3). |
-| G3 | "RLS so users only read/write own rows" | Underspecified. Without `WITH CHECK` on INSERT/UPDATE, a user can write rows for someone else, or move their row to another `user_id`. Since 2026, new `public` tables also get **no Data API grants** by default (Supabase changelog 45329; applies to all projects from 2026-10-30). Without explicit `GRANT`s every query fails. | Explicit `revoke … from anon, authenticated` + least-privilege `grant`s. Per-command policies `to authenticated`, using `(select auth.uid()) = user_id`. INSERT has `WITH CHECK`; UPDATE has both `USING` and `WITH CHECK`. `meals` gets no UPDATE or DELETE grant, because no feature needs them. All of this was verified against a local stack with 17 pgTAP assertions. |
-| G4 | `image_url` column | It never says where the image lives. A public bucket would expose meal photos (health-adjacent data). The column is also unused by any MVP screen. | **Photos are not stored.** The image goes to Groq once and is discarded, and `image_url` is dropped. **Decided by the human (revision 1).** A later version could keep photos in a private bucket `meal-photos` with storage RLS on `(storage.foldername(name))[1] = auth.uid()::text`, plus signed URLs. |
-| G5 | "Force the tool call … prevents parsing bugs" | A forced or schema-shaped response can still be wrong: truncation (`finish_reason: "length"`), invalid JSON, out-of-range numbers, enum casing. Provider-side enforcement doesn't replace validation at our trust boundary. | Groq JSON mode (`response_format: { type: 'json_object' }`) with the JSON Schema (`z.toJSONSchema(AnalysisSchema)`) in the system prompt. Then, on the server: check `finish_reason === 'stop'`, `JSON.parse`, lowercase `confidence`, and `AnalysisSchema.safeParse` with real bounds. Anything else returns 502 with a friendly message. G13 explains why this isn't strict `json_schema` or tool use. |
-| G6 | Tool schema `items: {name, grams, calories}` | Step 4 lets users edit per-item macros, but items carry no macros, so edited items can't re-total protein/carbs/fat. | Every item is `{name, grams, calories, protein_g, carbs_g, fat_g}`, for both model output and saved rows. |
-| G7 | Stored `total_calories, protein_g, carbs_g, fat_g` next to `items` | Two sources of truth: totals drift from items as soon as an item is edited, and a client can post totals that don't match. | **Items are the only source of truth.** No total columns. `sumItems(items)` (one shared TS function, unit-tested) computes totals for review, dashboard and history. The DB `CHECK (meal_items_valid(items))` enforces item shape and bounds. |
-| G8 | "Daily totals across time zones" (test only) | No design. Grouping by UTC `created_at` puts a 7 am Manila breakfast on the previous day, and Vercel servers run in UTC. | Each meal stores `eaten_on date`, the user's local calendar date at save time, computed on the server from a validated IANA `tz` cookie that a client component keeps in sync. "Today" and history group by `eaten_on`, so no tz math happens in SQL. Times render with an explicit `timeZone`. |
-| G9 | "Compress to under 1 MB, convert to base64, POST" | Base64 adds 33%. Unknown body caps: Server Actions default to 1 MB; Vercel functions cap at 4.5 MB. The guide gives no server-side size or type check, and no resize (phone photos are 3–12 MB). | Client resizes the long edge to 1568 px, JPEG q0.8 (retry q0.6). It posts **multipart** `image` (binary) to the route handler, not a Server Action. One shared `MAX_IMAGE_BYTES = 1_500_000` gates the client and the server (413). Allowed types are `image/jpeg`/`png`/`webp` (415). Base64 is encoded on the server, only for the Groq call (as a `data:` URL). Groq bills a flat 2 048 tokens per image for this model, so 1568 px only keeps the upload small. |
-| G10 | `SUPABASE_SERVICE_ROLE_KEY` in Vercel env | Not needed: every operation is user-scoped under RLS. Having it in the deployment only adds blast radius. | **No service-role/secret key anywhere**, local or prod. The e2e login reads the magic link from local Mailpit instead. |
-| G11 | "Daily scan limit … otherwise AI calls become your largest cost" | On Groq's free tier, the constraint is quota, not money. Limits apply per Groq **organization** and are shared by every user. For `qwen/qwen3.8-27b` the docs list 30 RPM, 1K RPD, 8K TPM and 200K TPD, labelled "base limits for the Developer plan" (free-tier numbers may be lower; verify at build, H4). At about 3K tokens per analysis (2 048 image + prompt + output), that is roughly 2 analyses per minute and 65 per day **for the whole app**. One user can exhaust everyone's quota. | Paid scan limits stay out of scope, and a per-user daily cap is deferred until before sign-ups open (H8). Groq 429s map to separate "busy" and "daily limit" messages (Task 5). Human step H3: turn off "Allow new users to sign up" after creating your own account. |
-| G12 | Hosted Supabase email (implicit) | The built-in mailer is rate-limited and not meant for production. | Human step H3: configure custom SMTP before inviting anyone. |
-| G13 | (Revision 1) Claude Vision via Anthropic | The human has no Anthropic key and wants to stay on Groq's free tier. | The provider becomes Groq, via `groq-sdk@1.6.0` and model `qwen/qwen3.8-27b`. That is the only vision model generally available on Groq; `meta-models/muse-spark-open` is a limited preview you have to request. What this changes:<br>(1) **Preview model.** Groq says preview models "may be discontinued at short notice". The model ID lives in one constant, and a missing or decommissioned model maps to 502 with a server log.<br>(2) **Schema enforcement.** Groq lists this model for strict `json_schema`, but its docs only document JSON mode, not structured outputs, with image input. The plan uses JSON mode plus Zod. Strict `json_schema` is a one-line upgrade after the real-photo check (H7).<br>(3) **Limits.** Quota is per organization (G11). We send 1 image per request (the limit is 3), and each image costs 2 048 input tokens. Requests with an image URL can be up to 20 MB; the base64 limit isn't documented. Our ≤ 1.5 MB binary becomes about 2 MB of base64 (verify at build).<br>(4) **Data.** Groq doesn't keep inference data by default, but may log inputs and outputs for up to 30 days for reliability or abuse checks. Zero Data Retention is available to every customer (H4). Logs are stored in US GCP.<br>(5) **Gone:** Anthropic's thinking/effort settings and its `zodOutputFormat` helper. |
+- **State owner.** Three client components need the same selected day, and a Server Component can't hold state. So `TodayScreen` (server: header + frame) renders one small client owner `TodayDays` that holds `selected` and renders `WeekStrip`, `MacroRings` and `MealList`. No context, no URL state.
+- **Selected state is a date string**, not an index. If the 7-day window shifts on a `router.refresh()` (TimeZoneSync changing tz), the same calendar day stays selected; if it left the window, fall back to today (last index).
+- **All locale formatting happens on the server** (`buildWeek`): weekday letter, date number, full-date label, logged time. Client components receive strings, so server and browser ICU can never cause a hydration mismatch.
+- **Client components must not import `@/lib/nutrition`** (it builds zod schemas at module scope, which would ship zod to the browser). Client-safe helpers live in a new zero-dependency `lib/today.ts`; `buildWeek` lives next to `groupByDay` in `lib/nutrition.ts` and runs on the server only. Client code rounds with `Math.round` (same as `fmt`).
+- **Day order** is oldest → newest, left to right; today is the rightmost (index 6).
+- **Arrow keys select and focus** (selection follows focus; switching is local and cheap). ArrowLeft/ArrowRight clamp at the ends (no wrap). Home/End jump to index 0/6. Arrows, Home and End call `preventDefault` (no page scroll).
+- **Day button aria-label** = full date, e.g. `Tuesday, October 20, 2026`, plus `, goal met` when the dot shows, so the dot is not a visual-only signal (FC-18). The week strip is `role="group"` with `aria-label="Last 7 days"`.
+- **Goal-met rule** compares the *rounded* day calories (what the user sees) with integer math: `r*10 >= t*9 && r*10 <= t*11`, so 90 % and 110 % are inclusive and floating point can't flip a boundary. No targets → never met.
+- **0 g target with eaten > 0** renders an empty ring (offset 1). This is the literal reading of "counts as full only when eaten is 0" (**decided: human, 2026-10-20**, OQ1).
+- **A progress circle at offset 1 is hidden (`opacity-0`)**: with round caps, a zero-length dash still paints a 15 px dot at 12 o'clock in Chrome/Safari.
+- **Count-up:** the first render shows the final value (SSR = hydration, and no 0→N flash on page load); only changes animate. Ease-out cubic `1 - (1 - p) ** 3`, 900 ms, interruptible: a new value starts from the currently shown value. The ring fill likewise does not animate on first paint.
+- **No targets:** legend shows each number with a muted ` g` (no `/ <target>`), and the kcal line is replaced by the `Set your daily targets` link. Rings show the three tracks only (no progress circles in the DOM).
+- **Rings `role="img"`** sits on a wrapper around the SVG and the centre kcal (the SVG itself is `aria-hidden`), so the label must carry the kcal too. Exact format under Task 6.
+- **Legend swatch:** each legend row starts with an 8 px dot in its ring colour, so the colour → macro mapping is visible.
+- **Reduced motion also tames the highlight slide** (200 ms ease-out instead of the 590 ms spring). The request lists stagger/count-up/ring only; the slide is motion too, and it is one class.
+- **"1 item" singular** for one item, `<n> items` otherwise (**decided: human, 2026-10-20**, OQ2).
+- **Stagger plays on first paint too** (rows mount with the animation; CSS-only, works before hydration). Duration 400 ms, `cubic-bezier(.32,.72,0,1)`, fill `both`, delay `index * 60ms`.
+- **Rings card wraps at narrow widths:** `flex flex-wrap`, legend `flex-1 basis-[120px] min-w-0`. At 320 px the legend drops below the rings (160 + 16 + 120 > 248 px of card content); from 375 px it sits beside them.
+- **Layout column:** `min-h-dvh` column, `max-w-[430px]`, `mx-auto`; the tab bar is `sticky bottom-0`, so pages keep normal document scrolling (no inner scroll container). Safe-area insets are not handled (no `viewport-fit=cover`; not a PWA).
+- **Tab bar** is text-only (no icon set; no new deps). Active tab = `aria-current="page"` + foreground colour + `font-semibold`; inactive = muted. Exact pathname match (all four routes are flat).
+- **Avatar:** `role="img"` with `aria-label="Signed in as <email>"`. Initials = local part split on `.`, `_`, `-`, `+`; first character of the first two non-empty parts, uppercased; `?` if none.
+- **No `loading.tsx`.** The page is server-rendered with no client fetching, and day switching is instant. Load failures already throw to `app/(app)/error.tsx`, which renders inside the layout (tab bar stays).
+- **No midnight roll-over:** a Today page left open past midnight keeps the old window until the next navigation or refresh (same as today's behaviour).
+- **Weight 700 is added to the Plex font load**; it currently loads 400/500/600 only, so `font-bold` on the title would be synthesized.
+- **Design-spec calls adopted:** centre kcal is `text-lg` (not `text-2xl`) so 4-digit totals clear the Fat ring; `html { scroll-padding-bottom: 4rem; }` so focus never lands under the sticky tab bar; Back to `/` resets the selection to today; arcs hide instantly when a day drops to 0; the selected day's text turns white while the pill is still sliding (accepted transient).
+- **Design-spec Plan gap 3 (button styles on `/log` and `/settings` still use `bg-black`/palette classes):** accepted for this slug; logged under Deferred.
+- **Not changing** `vitest.config.ts`/`eslint.config.mjs` to exclude `.orchestrate/` (lesson says "consider"); QA follows that lesson's check instead.
 
 ---
 
 ## Impact call-outs
 
-**Data / schema:** two new tables, `public.daily_targets` and `public.meals`, plus the function `public.meal_items_valid(jsonb)`.
-- `daily_targets`: `user_id` PK → `auth.users` on delete cascade; `calorie_target int 1..10000`; `protein_target_g`, `carbs_target_g`, `fat_target_g int 0..1000`.
-- `meals`: `id uuid` PK (client-generated, used for idempotency); `user_id` → `auth.users` on delete cascade; `eaten_on date`; `logged_at timestamptz default now()`; `items jsonb CHECK meal_items_valid`.
-- Index `meals_user_id_eaten_on_idx (user_id, eaten_on desc, logged_at desc)`.
-- **Migrations:** `supabase/migrations/20261020000000_nutrition_mvp.sql`. **Apply to production before merge — human step (H2).**
-
-**Services / registration (Next.js file conventions):**
-- `proxy.ts` (root);
-- route handlers `app/api/analyze/route.ts` (POST), `app/auth/confirm/route.ts` (GET) and `app/auth/signout/route.ts` (POST);
-- Server Actions `app/login/actions.ts#sendMagicLink`, `app/(app)/settings/actions.ts#saveTargets` and `app/(app)/log/actions.ts#saveMeal`.
-
-**Events / hooks:** none. No webhooks, DB triggers or cron, because nothing needs them.
-
-**API contract — `POST /api/analyze`** (same-origin only, no other callers):
-- Request: `multipart/form-data`, one field `image` (File).
-- 200: `{ "items": MealItem[], "confidence": "high" | "medium" | "low" }`, where `MealItem = { name: string, grams: number, calories: number, protein_g: number, carbs_g: number, fat_g: number }`. `items` may be empty (no food found).
-- Errors return `{ "error": string }` with these exact strings:
-
-| Status | Cause | `error` text |
-|---|---|---|
-| 400 | Missing field or not multipart | `Choose a photo to analyze.` |
-| 401 | No session | `Sign in again to analyze photos.` |
-| 413 | Image > 1 500 000 bytes, `content-length` > 1 700 000, or Groq 413 | `That photo is too large. Try another one.` |
-| 415 | Type not jpeg/png/webp | `Use a JPEG, PNG or WebP photo.` |
-| 422 | Groq 400 other than `json_validate_failed`: unreadable image | `We couldn't read that photo. Try another one or enter the meal manually.` |
-| 429 | Groq 429 with `retry-after` ≤ 60 s, or absent (per-minute limit) | `Photo analysis is busy. Wait a minute and try again.` |
-| 429 | Groq 429 with `retry-after` > 60 s (daily quota) | `Today's photo analysis limit is used up. Enter the meal manually or try again tomorrow.` |
-| 502 | Any other upstream error, timeout, `finish_reason` ≠ `stop`, Groq `json_validate_failed`, missing or decommissioned model, or invalid output | `Couldn't analyze the photo. Try again or enter the meal manually.` |
-
-- `GET` gets Next's default 405.
-
-**API contract — Server Action `saveMeal({ id: string, items: MealItem[] })`:**
-- On success, or a 23505 duplicate id (retry), it calls `revalidatePath('/')` then `redirect('/')`.
-- Otherwise it returns `{ error: string }`:
-  - validation or 23514: `Some values are out of range. Check each item and try again.`;
-  - no session: `Your session expired. Sign in again.`;
-  - other errors: `Couldn't save your meal. Try again.`
-
-**API contract — Server Action `saveTargets(prev, formData)`:** returns one of:
-- `{ ok: true }`;
-- `{ error: 'Couldn't save targets. Try again.' }`;
-- `{ error: 'Some values are out of range.' }`.
-
-**UI (new screens; copy is verbatim):**
-- Nav (in `app/(app)/layout.tsx`): `Today`, `History`, `Settings`, `Sign out`.
-- `/login`:
-  - heading `Sign in`; label `Email`; button `Send sign-in link`;
-  - success `Check your email for a sign-in link.`;
-  - send error `Couldn't send the link. Try again in a minute.`;
-  - when `?error=link`: `That sign-in link is invalid or expired. Request a new one.`
-- `/` (Today):
-  - heading `Today`; link `Snap meal` → `/log`;
-  - kcal line `{eaten} / {target} kcal` plus `{n} kcal left` or `{n} kcal over`;
-  - rows `Protein`, `Carbs`, `Fat`, each `{eaten} / {target} g`;
-  - with no targets, only `{eaten} kcal` and a link `Set your daily targets` → `/settings`;
-  - no meals: `No meals logged today.`
-- `/log`:
-  - button `Snap meal`; status `Analyzing your meal…`;
-  - low-confidence banner `Rough estimate — tap any item to adjust.`;
-  - disclaimer `Estimates from a photo, not medical advice. Check and edit before saving.`;
-  - field labels `Food`, `Grams`, `Calories`, `Protein (g)`, `Carbs (g)`, `Fat (g)`;
-  - buttons `Remove`, `Add item`, `Log meal` (`Saving…` while pending), `Retake`, `Try again`, `Enter manually`;
-  - when analysis returns 0 items: `No food detected. Add items manually.`
-- `/settings`:
-  - heading `Daily targets`;
-  - labels `Calories (kcal)`, `Protein (g)`, `Carbs (g)`, `Fat (g)`;
-  - button `Save targets`; success `Targets saved.`
-- `/history`:
-  - heading `History`; empty `No meals in the last 30 days.`;
-  - day heading such as `Mon, Oct 20` (`weekday:'short', month:'short', day:'numeric'` in the user's tz);
-  - day totals `{kcal} kcal · P {p} g · C {c} g · F {f} g`;
-  - each meal shows its time (`hour:'numeric', minute:'2-digit'` in the user's tz) and item names.
-
-**Permissions / ACL:** Postgres role `authenticated` gets `select, insert, update` on `daily_targets` and `select, insert` on `meals`. `anon` gets nothing on either. Every page, Server Action and route re-checks auth with `getClaims()`, not just `proxy.ts`.
-
-**Config / env / dependencies:**
-- Env vars:
-  - `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (locally, generated by `npm run env:local` from the local stack);
-  - `GROQ_API_KEY`: server only, never `NEXT_PUBLIC_`; not needed for any test.
-- Deps (exact pins, verified with `npm view` on 2026-10-20):
-  - from the scaffold: `next@16.4.2`, `react@19.3.0`, `react-dom@19.3.0`;
-  - added runtime deps: `@supabase/ssr@0.12.7`, `@supabase/supabase-js@2.118.0`, `groq-sdk@1.6.0`, `zod@4.6.7`.
-- Dev deps:
-  - from the scaffold: `typescript@^5`, `eslint@^9`, `eslint-config-next@16.4.2`, `tailwindcss@^4`, `@tailwindcss/turbopack@^4`, `@types/*`;
-  - added: `vitest@5.0.5`, `@playwright/test@1.64.1`, `supabase@2.121.0` (the CLI).
-- No native rebuild. Playwright needs Chromium revision 1248 (`npx playwright install chromium`, one-time; this machine only caches 1234).
-
----
+- **Data / schema:** reads only. `public.meals` (`id, eaten_on, logged_at, items`) over a 7-day `eaten_on` range, served by the existing index `meals_user_id_eaten_on_idx (user_id, eaten_on desc, logged_at desc)`; `public.daily_targets` (`calorie_target, protein_target_g, carbs_target_g, fat_target_g`). **Migrations: none.**
+- **Services / registration:** none. New files are picked up by the App Router by import only. `TabBar` is mounted in `app/(app)/layout.tsx`. `requireUser()` gains an additive `email` field.
+- **Events / hooks:** none emitted. Consumes the existing `tz` cookie via `getToday()`.
+- **API contract:** none changed. `POST /auth/signout` (unchanged) is now called from `/settings` instead of the header.
+- **UI:** `/` fully redesigned; the `(app)` layout (header nav → bottom tab bar) changes `/log`, `/history`, `/settings`; `/settings` gains Sign out. The designer's `.orchestrate/today-macro-rings/design-spec.md` is folded in: every `D-` item is an AC on the task that builds its screen (S1/S2/S4 → Task 5, S3 → Task 6, S5/S6 → Task 4), and its Plan gaps are resolved below (Task 3 AC-3.4, Task 4 scroll padding, Task 6 centre size, Deferred). New copy, verbatim:
+  - `NutritionTracker` (eyebrow), `Today` (h1), `Meals` (h2)
+  - `No meals logged on this day.`, `Snap meal` (→ `/log`), `Set your daily targets` (→ `/settings`)
+  - `Protein`, `Carbs`, `Fat`, `/ <target> g`, `<n> kcal left`, `<n> kcal over`, `kcal` (centre unit)
+  - `<n> items · <kcal> kcal` / `1 item · <kcal> kcal`
+  - tabs `Today`, `Log`, `History`, `Settings`; button `Sign out` (on `/settings`)
+  - aria: `Last 7 days`, day labels `<Weekday>, <Month> <d>, <yyyy>[, goal met]`, avatar `Signed in as <email>`, rings label (Task 6).
+  - Removed copy: `No meals logged today.`, `<eaten> / <target> kcal`, `<label> progress` progressbars, header `Snap meal` button.
+- **Permissions / ACL:** none; RLS unchanged.
+- **Config / env / dependencies:** none. No package changes, no env vars. `app/layout.tsx` font weights gain `"700"` (self-hosted by `next/font`).
 
 ## Activation path
 
-1. **Registration:** Next's file-system routing registers:
-   - `proxy.ts` (matcher: everything except `_next/static`, `_next/image`, `favicon.ico` and image files);
-   - pages under `app/(app)/` and `app/login`;
-   - route handlers `app/api/analyze/route.ts`, `app/auth/confirm/route.ts` and `app/auth/signout/route.ts`.
-
-   The Supabase schema registers by applying the migration: locally with `supabase db reset`, in prod with `supabase db push` (H2).
-2. **Discovery:**
-   - Unauthenticated `GET /` → `proxy.ts` → `getClaims()` is empty → 307 to `/login`.
-   - On `/login`, `sendMagicLink` → `signInWithOtp` sends an email whose link is `{{ .SiteURL }}/auth/confirm?token_hash=…&type=email`.
-   - `/auth/confirm` → `verifyOtp` sets the session cookies → redirect to `/`.
-   - Nav links reach `/log`, `/history` and `/settings`.
-3. **Invocation:**
-   - On `/log`, `Snap meal` → file input (`capture="environment"`) → `compressImage` → `fetch('/api/analyze', multipart)` → `analyzeMeal()` → Groq chat completions → JSON → review form.
-   - `Log meal` → `saveMeal` Server Action → `meals` insert → `redirect('/')`.
-   - `/` (Server Component) reads the `tz` cookie, queries `meals` where `eaten_on = today` plus `daily_targets`, and renders `sumItems`.
-   - `TimeZoneSync` (root layout) keeps the `tz` cookie current.
-
----
+1. **Registration:** `app/(app)/page.tsx` is the `/` route in the `(app)` group; `app/(app)/layout.tsx` wraps every signed-in route and now renders `<TabBar />`.
+2. **Discovery:** `proxy.ts` lets signed-in users reach `/`; the layout calls `requireUser()`; magic-link sign-in and `saveMeal` both land on `/` (`redirect("/")`).
+3. **Invocation:** `TodayPage` → `requireUser()` (email) + `getToday()` → one `meals` query (`gte eaten_on = lastSevenDays(date)[0]`, `lte eaten_on = date`) + `daily_targets` → `buildWeek(...)` → `<TodayScreen email days targets>` (server) → `<TodayDays>` (client, holds `selected`) → `<WeekStrip>`, `<MacroRings>`, `<MealList key={date}>`. Clicking/arrowing a day calls `setSelected(date)`; nothing hits the server.
+4. **Tab bar:** `TabBar` reads `usePathname()` and marks the matching link `aria-current="page"`; links navigate with `next/link`.
 
 ## Risks
 
 | FC | Applies? | Covered by |
 |---|---|---|
-| FC-01 migration not applied where code runs | Yes: Vercel deploys from `main` without migrating | Task 2 (AC-2.5) + human step H2 |
-| FC-02 manifest changes what ships | Yes: new `package.json`, `next.config.ts` | Task 1 (AC-1.3 `npm run build`), Task 10 (Vercel preview check is H5, not verified locally) |
-| FC-03 destructive DDL | Migration has none | Task 2 (AC-2.4 grep) |
-| FC-04 boundary input → 5xx | Yes: analyze route, both actions, DB CHECK | Task 5 (AC-5.3, 5.4), Task 6 (AC-6.2), Task 7 (AC-7.6), Task 2 (AC-2.2: string-typed number gives 23514, not a cast error) |
-| FC-05 client ≠ server ≠ DB limits | Yes | Task 3 (single constants), Task 2 (same numbers in SQL), Task 6 AC-6.3, Task 7 AC-7.7 |
-| FC-06 CORS / router | Same-origin only, no CORS; the only new verb is POST on `/api/analyze` | Task 5 AC-5.5 (route reachable from the running app via e2e) |
-| FC-07 optimistic update | n/a: no optimistic updates; saves are pessimistic, then redirect | — |
-| FC-08 retry id lost | Yes: `saveMeal` | Task 2 (AC-2.2 duplicate id → 1 row), Task 7 (AC-7.4) |
-| FC-09 overlapping async | Yes: new photo while analyzing | Task 7 (AC-7.5) |
-| FC-10 cancel during async loses input | Yes: Retake/new photo or navigating away mid-analysis | Task 7 (AC-7.5) |
-| FC-11 derived value stale after toggle | n/a: no unit/mode toggles. Totals are derived live from items | Task 7 AC-7.3 asserts live totals after an edit |
-| FC-12 shared load/action error | Yes: analyze error vs save error; settings | Task 7 (AC-7.8), Task 6 (AC-6.4) |
-| FC-13 external state never re-read | Yes: auth session, tz | Task 4 (proxy refreshes session on every request; AC-4.4), Task 3/4 (`TimeZoneSync` on mount and `visibilitychange`; AC-4.5) |
-| FC-14 copy not verbatim | Yes | Tasks 4, 6, 7, 8, 9 (grep ACs) |
-| FC-15 shared function changed | `sumItems` is shared by `/log`, `/` and `/history` | Task 3 tests; Tasks 8/9 fixture ACs |
-| FC-16 code that can't run | Yes | Every task runs `npm run typecheck` |
-| FC-17 wrong totals for data shape | Yes: decimal macros, multi-meal days | Task 3 (AC-3.1), Task 8 (AC-8.1), Task 9 (AC-9.1) |
-| FC-18 nested interactive | Yes | Tasks 7, 8, 9 (e2e `button button` count = 0) |
-| FC-19 colour / contrast | Yes | Task 1 (AC-1.5): Tailwind palette only; hex allowed only in `app/globals.css`; text ≥ 4.5:1 |
-| FC-20 320 px | Yes | Tasks 7, 8, 9 (e2e at 320×568, no horizontal scroll) |
-| FC-21 states | Yes | Tasks 4, 6, 7, 8, 9 |
-| FC-22 command can't run here | All commands dry-run by the Architect (see Verification commands) | — |
-| FC-23 verification hit a real DB | Yes | Task 4 (AC-4.6: e2e global setup refuses a non-`127.0.0.1` Supabase URL) |
-| FC-24 device/prod-only behaviour | Yes | Hand-off "not verified" list: real phone camera capture; HEIC from non-Safari browsers; real Groq estimate quality; JSON mode with a real image (H7); the real free-tier quota; prod email delivery/SMTP; Vercel deploy |
-| FC-25 test never seen failing | Yes | Every test task: QA stashes the implementation, sees RED, restores, sees GREEN |
-| FC-26 test doesn't exercise the path | Yes | Task 5 tests go through the real SDK with an injected `fetch`, not a mocked `analyzeMeal`. Task 7's race test holds the first `/api/analyze` request in flight before the second pick |
-| FC-27 time/locale flake | Yes | Task 3 (frozen `now`), Task 4 (Playwright `timezoneId: 'Asia/Manila'`; expected dates computed in-test) |
-| FC-28 mocks hide constraints | Yes | Task 2: pgTAP against a freshly reset local Postgres |
+| FC-01 migration not applied | No: no migration | — |
+| FC-02 manifest changes | No: no `package.json`/bundler/config change | Task 3 AC-3.3 still runs `npm run build` |
+| FC-03–06 DDL / boundary 5xx / limits / CORS | No: no writes, no new endpoints | — |
+| FC-07–12 async state | No: day switching is synchronous local state, no mutations | — |
+| FC-13 external state re-read | Yes (tz) | Existing `TimeZoneSync`; Task 5 AC-5.9 (selection survives a refresh by date) |
+| FC-14 copy/numbers verbatim | Yes | Task 4 AC-4.1/4.5, Task 5 AC-5.1/5.4/5.5, Task 6 AC-6.1/6.2/6.4; QA greps the copy list in Impact → UI |
+| FC-15 shared function changed | Yes: `requireUser` (callers: layout, history, settings, today, `pages.test.ts` mock), the layout nav (`e2e/auth.spec.ts` sign-out), Today copy (`e2e/log-meal.spec.ts:44`), `app/layout.tsx` font | Task 4 AC-4.4, Task 5 AC-5.8, Task 6 AC-6.8 (full e2e) |
+| FC-16 code can't run as written | Yes: react-hooks 7.1.1 rules (`set-state-in-effect`, `refs`, `purity`) | Task 5 AC-5.10, Task 6 AC-6.7 (lint with no `eslint-disable`) |
+| FC-17 wrong numbers for new data shape | Yes | Task 2 AC-2.1 (fixture totals), Task 6 AC-6.1 (e2e totals) |
+| FC-18 nested interactive / hidden affordance | Yes | Task 5 AC-5.6, Task 4 AC-4.3; goal dot in aria-label (AC-5.3) |
+| FC-19 colour outside tokens / contrast | Yes | Task 3 AC-3.1/3.2, Task 5 AC-5.7, Task 6 AC-6.6 |
+| FC-20 320 px | Yes | Task 4 AC-4.6/D-5.7, Task 5 D-2.8/D-4.5, Task 6 AC-6.5/D-3.9 |
+| FC-21 states | Yes: empty day, no targets, load error, keyboard/focus | Task 5 AC-5.1/5.2/5.11, Task 6 AC-6.2 |
+| FC-22 command can't run | Dry-run below | Verification commands table |
+| FC-23 real DB | Yes: the repo is **linked to the production Supabase project** (`srxedrdugbeurnupuyqk`) | Never pass `--linked`/`--db-url`; `e2e/global-setup.ts` refuses non-local URLs (unchanged) |
+| FC-24 device-only | Yes | Hand-off "not verified": iOS Safari `100dvh`/tab bar under the toolbar, the spring's feel, Safari's `pathLength` + round-cap rendering, dark mode on a real device, VoiceOver announcements |
+| FC-25 test never seen failing | Yes | Every test-adding task: QA stashes the implementation, sees RED, restores, sees GREEN |
+| FC-26 test doesn't exercise the path | Yes | Task 5 AC-5.3 (request listener attached before the click; mutation: replace `setSelected` with `router.push`), AC-5.4 (mutation: drop `onKeyDown`) |
+| FC-27 time/locale flake | Yes | Task 1 (frozen `now`), Task 5 (Playwright `timezoneId: "Asia/Manila"`; seeded dates computed in-test with `localDate`; logged time asserted by pattern, not value) |
+| FC-28 mocks hide constraints | No: no constraint logic; e2e seeds through real PostgREST + RLS | — |
 | FC-29–32 Shopware | n/a: not a Shopware project | — |
+| FC-33 serverless global | No: no module-global client | — |
 
-Provider risks outside the checklist (revision 1):
-- **R-1 Preview-model churn.** `qwen/qwen3.8-27b` can be withdrawn at short notice. Covered by Task 5 AC-5.7: the ID appears in one place and a 404 maps to 502. The human watches Groq's deprecations page.
-- **R-2 Org-wide free-tier quota.** Task 5 AC-5.4 covers clear busy and daily-limit messages, with `Enter manually` as a fallback (Task 7). The per-user cap is deferred until before sign-ups open (H8).
-- **R-3 Data retention.** Meal photos go to Groq (US). Step H4 turns on Zero Data Retention. Photos are never stored by the app (G4).
-
----
+Other risks:
+- **R-1 Hydration mismatch** (Intl output, count-up, Date). Covered by server-side formatting and AC-5.10 (no console errors).
+- **R-2 Highlight overshoot** (the spring peaks at 1.038) could stick out of the track at index 6 and cause horizontal scroll. The track is `overflow-hidden`; focus outlines are inset so they aren't clipped (AC-5.6).
+- **R-3 Zod in the client bundle.** AC-5.12 greps client files for `@/lib/nutrition`.
 
 ## Verification commands
 
-Everything runs on the **host** in `/Users/dnmrk/Sites/nutrition-tracker`. There is no container for Node. Supabase runs in Docker through the CLI.
+All on the host in `/Users/dnmrk/Sites/nutrition-tracker`. Dry-run by the Architect on 2026-10-20:
 
-| Check | Command | Dry-run result (Architect, 2026-10-20) |
+| Check | Command | Dry-run result |
 |---|---|---|
-| Lint | `npm run lint` (→ `eslint`) | exit 0 on the 16.4.2 scaffold |
-| Types | `npm run typecheck` (→ `next typegen && tsc --noEmit`) | exit 0. Plain `tsc --noEmit` on a fresh checkout exits 2 (`LayoutProps`), which is why `typegen` runs first |
-| Unit | `npm test` (→ `vitest run`) | vitest 5.0.5 (engines `^22.12`; host is 22.23.1 ✓) |
-| Build | `npm run build` (→ `next build`) | exit 0 on the scaffold (needs network for `next/font/google`) |
-| DB start | `npm run db:start` (→ `supabase start -x realtime,storage-api,imgproxy,studio,edge-runtime,logflare,vector,supavisor,postgres-meta`) | OK. First run pulls images (~5 min). Ports 54321/54322/54324 free |
-| DB reset | `npx supabase db reset` | Migration applied cleanly in the dry-run |
-| DB tests | `npm run db:test` (→ `supabase test db`) | 17/17 pgTAP pass with the exact SQL in Task 2 |
-| Local env | `npm run env:local` | Prints `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` correctly |
-| E2E browsers | `npx playwright install chromium` (one-time) | Needed: 1.64.1 wants revision 1248; only 1234 is cached |
-| E2E | `npm run e2e` (→ `playwright test`). Needs `db:start` running and `.env.local` present | Magic link → Mailpit API (`/api/v1/search?query=to:<email>`, `/api/v1/message/<ID>`) → `verify` with `token_hash` → PostgREST insert all verified over HTTP |
+| Lint | `npm run lint` | exit 0 |
+| Types | `npm run typecheck` (`next typegen && tsc --noEmit`) | exit 0 |
+| Unit | `npm test` (`vitest run`) | 6 files, 74 tests pass |
+| Build | `npm run build` | exit 0 (all `(app)` routes dynamic `ƒ`) |
+| DB start | `npm run db:start` | **not started** by the Architect (leaves containers running). `npx supabase start --help` exits 0; Docker is up; the Supabase images (postgres 17.11, gotrue, postgrest, kong, mailpit) are cached; ports 54321/54322/54324/3000 are free |
+| DB reset | `npx supabase db reset` (local; **never** `--linked`) | not run (needs the stack); worked in the previous plan's dry-run |
+| Local env | `.env.local` already has `NEXT_PUBLIC_SUPABASE_URL="http://127.0.0.1:54321"`. Run `npm run env:local` only if the stack's keys changed (it rewrites `.env.local` and drops the `VERCEL_OIDC_TOKEN` line; `vercel env pull` restores it) | checked |
+| E2E | `npm run e2e` (`playwright test`), needs the stack | `npx playwright test --list` → 29 tests in 5 files; chromium 1248 is installed |
+| Single e2e file | `npx playwright test e2e/today.spec.ts` | same runner |
+| Stop | `npx supabase stop` after the run (leave the machine as found) | — |
 
-Full local gate, in order:
+Full gate, in order:
 
 ```
-npm run db:start && npx supabase db reset && npm run db:test
-npm run env:local
+npm run db:start && npx supabase db reset
 npm run lint && npm run typecheck && npm test && npm run build
 npm run e2e
+npx supabase stop
 ```
 
 ---
 
 ## Tasks
 
-### Task 1: Scaffold Next.js 16 app and tooling  `[mechanical]`
+### Task 1: Pure helpers for the Today screen  `[mechanical]`
 
-**Files:** create everything from the scaffold at the repo root. Then:
-- modify `package.json`, `.gitignore` and `app/layout.tsx`;
-- delete the scaffold's `app/page.tsx` (Task 8 recreates the route as `app/(app)/page.tsx`);
-- create `vitest.config.ts`, `.env.example` and `README.md`.
-
-**Interfaces:** produces the npm scripts named in Verification commands, and the `@/*` path alias pointing at the repo root.
-
-**Steps:**
-- [ ] `create-next-app` refuses a non-empty directory (`perplexity.txt`), so scaffold in the scratchpad: `npx create-next-app@16.4.2 <scratchpad>/nt-scaffold --ts --tailwind --eslint --app --no-src-dir --import-alias "@/*" --use-npm --skip-install --disable-git --no-react-compiler --no-agents-md --no-cache-components --yes`. Copy every file (including dotfiles) into the repo root, without overwriting `perplexity.txt`, `tasks/` or `.orchestrate/`.
-- [ ] `package.json`: set `"name": "nutrition-tracker"`. Add scripts:
-  - `"typecheck": "next typegen && tsc --noEmit"`
-  - `"test": "vitest run"`
-  - `"e2e": "playwright test"`
-  - `"db:start": "supabase start -x realtime,storage-api,imgproxy,studio,edge-runtime,logflare,vector,supavisor,postgres-meta"`
-  - `"db:test": "supabase test db"`
-  - `"env:local": "supabase status -o env --override-name api.url=NEXT_PUBLIC_SUPABASE_URL --override-name auth.publishable_key=NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY | grep NEXT_PUBLIC > .env.local"`
-- [ ] `npm install`. Then `npm install --save-exact @supabase/ssr@0.12.7 @supabase/supabase-js@2.118.0 groq-sdk@1.6.0 zod@4.6.7`, and `npm install --save-dev --save-exact vitest@5.0.5 @playwright/test@1.64.1 supabase@2.121.0`.
-- [ ] `.gitignore`: append `!.env.example`, `/test-results/` and `/playwright-report/`. The scaffold's `.env*` would otherwise ignore `.env.example`.
-- [ ] `.env.example` contains exactly three keys with empty values: `NEXT_PUBLIC_SUPABASE_URL=`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=` and `GROQ_API_KEY=`, plus the comment `# Never add a Supabase service-role/secret key: the app does not need one.`
-- [ ] `vitest.config.ts` uses `defineConfig` from `vitest/config`:
-  - `test: { environment: 'node', include: ['**/*.test.ts'], exclude: ['node_modules/**', 'e2e/**', '.next/**'] }`;
-  - `resolve: { alias: { '@': fileURLToPath(new URL('.', import.meta.url)) } }`.
-- [ ] `app/layout.tsx`: set metadata title `NutritionTracker`, description `Photo-based meal and macro tracker`. Keep the scaffold's fonts.
-- [ ] Delete `app/page.tsx` and `public/*.svg` from the scaffold.
-- [ ] `README.md`: replace with a "Local development" section listing the full local gate (from Verification commands) and `npx playwright install chromium`.
-
-**Acceptance criteria:**
-- `AC-1.1` Lint and types pass on a clean tree. **Verify:** `rm -rf .next && npm run lint && npm run typecheck` → exit 0.
-- `AC-1.2` Exact pins are recorded. **Inspect:** `package.json` has `"next": "16.4.2"`, `"@supabase/ssr": "0.12.7"`, `"groq-sdk": "1.6.0"`, `"zod": "4.6.7"` and `"vitest": "5.0.5"`, and no `typescript` 7.x.
-- `AC-1.3` Production build succeeds (FC-02). **Verify:** `npm run build` → exit 0.
-- `AC-1.4` No secrets or env files are committed. **Verify:** `git status --porcelain | grep -E '\.env(\.local)?$'` → no output, and `git check-ignore .env.example` → exit 1 (not ignored).
-- `AC-1.5` There is no cache-components mode and no stray hex colours (FC-19). **Verify:** `grep -n cacheComponents next.config.ts` → no output.
-
-### Task 2: Supabase local stack, migration, RLS and pgTAP tests  `[mechanical]`
-
-**Files:**
-- create `supabase/` via `npx supabase init` (config `project_id = "nutrition-tracker"`);
-- create `supabase/migrations/20261020000000_nutrition_mvp.sql`, `supabase/templates/magic_link.html` and `supabase/tests/rls_and_constraints.test.sql`;
-- modify `supabase/config.toml`.
-
-**Interfaces:** produces the tables, columns and limits used by Tasks 3–9. The `meals` PK is client-supplied; a duplicate insert returns PostgREST code `23505` (HTTP 409). A bad `items` value returns `23514` (HTTP 400).
-
-**Steps:**
-- [ ] `npx supabase init`. In `supabase/config.toml`:
-  - keep `site_url = "http://127.0.0.1:3000"`;
-  - set `[auth.rate_limit] sign_in_sign_ups = 300` and `token_verifications = 300` (local e2e only);
-  - append the block below.
-
-  ```toml
-  [auth.email.template.magic_link]
-  subject = "Your NutritionTracker sign-in link"
-  content_path = "./supabase/templates/magic_link.html"
-
-  [auth.email.template.confirmation]
-  subject = "Your NutritionTracker sign-in link"
-  content_path = "./supabase/templates/magic_link.html"
+- **Files:** create `lib/today.ts`, `lib/today.test.ts`.
+- **Interfaces:** consumes `addDays` from `@/lib/dates`. Produces (client-safe; imports nothing but `@/lib/dates`):
+  ```ts
+  export type Totals = { calories: number; protein_g: number; carbs_g: number; fat_g: number };
+  export type Targets = { calorie_target: number; protein_target_g: number; carbs_target_g: number; fat_target_g: number };
+  export type DayMeal = { id: string; initial: string; names: string; itemCount: number; kcal: number; time: string };
+  export type Day = { date: string; weekday: string; dayNumber: string; label: string; totals: Totals; goalMet: boolean; meals: DayMeal[] };
+  export function lastSevenDays(today: string): string[];          // oldest → newest, length 7, last === today
+  export function ringOffset(eaten: number, target: number): number; // 0 = full, 1 = empty
+  export function goalMet(calories: number, calorieTarget: number | null): boolean;
+  export function initials(email: string): string;
   ```
-- [ ] Create `supabase/templates/magic_link.html`:
+- **Steps:**
+  - [ ] `lastSevenDays(today)` = `Array.from({ length: 7 }, (_, i) => addDays(today, i - 6))`.
+  - [ ] `ringOffset(eaten, target)`: if `target <= 0` return `eaten <= 0 ? 0 : 1`; else return `1 - Math.min(1, Math.max(0, eaten / target))`.
+  - [ ] `goalMet(calories, t)`: `false` if `t` is `null` or `t <= 0`; else `r = Math.round(calories)`; return `r * 10 >= t * 9 && r * 10 <= t * 11`.
+  - [ ] `initials(email)`: local part = text before the first `@`; split on `/[._+-]+/`; drop empties; take the first code point (`[...part][0]`) of the first two parts; join; `toUpperCase()`; `"?"` if empty.
+  - [ ] `lib/today.test.ts` (frozen `const now = new Date("2026-10-19T23:30:00Z")`, as in `lib/dates.test.ts`):
+    - window across a tz boundary: `lastSevenDays(localDate("Asia/Manila", now))` equals `["2026-10-14", …, "2026-10-20"]`; `lastSevenDays(localDate("America/Los_Angeles", now))` ends `"2026-10-19"` and starts `"2026-10-13"`; month boundary `lastSevenDays("2026-03-03")[0] === "2026-02-25"`; length is 7.
+    - ring clamping: `(0,150)→1`, `(75,150)→0.5`, `(150,150)→0`, `(300,150)→0`, `(0,0)→0`, `(5,0)→1`, `(-1,150)→1`.
+    - goal met with target 2000: `1800→true`, `1799→false`, `2200→true`, `2201→false`, `1799.5→true` (rounds to 1800), `2200.5→false` (rounds to 2201); `(1900, null)→false`; `(0, 2000)→false`.
+    - initials: `"dean.mark@example.test"→"DM"`, `"dean@example.test"→"D"`, `"e2e-123-abc@example.test"→"E1"`, `"@x"→"?"`, `""→"?"`.
+- **Acceptance criteria:**
+  - `AC-1.1` The window ends on the user's local today across a UTC day boundary, and spans exactly 7 calendar days. — **Verify:** `npx vitest run lib/today.test.ts` → all pass; QA stash-RED run fails.
+  - `AC-1.2` Rings clamp to [0, 1] and over-target is full. A 0 g target with 0 g eaten is a full ring (`ringOffset(0, 0) === 0`); a 0 g target with any food eaten is an empty ring (`ringOffset(5, 0) === 1`) (OQ1, decided). — **Verify:** same command, the `ringOffset` cases pass.
+  - `AC-1.3` The goal-met rule is inclusive 90–110 % of the rounded calories. — **Verify:** same command, the boundary cases pass.
+  - `AC-1.4` `lib/today.ts` is client-safe. — **Verify:** `grep -n "^import" lib/today.ts` → only `@/lib/dates` (or `./dates`).
 
-  ```html
-  <h2>Sign in to NutritionTracker</h2>
-  <p><a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email">Sign in</a></p>
+### Task 2: `buildWeek` — server-side shaping of the 7 days  `[mechanical]`
+
+- **Files:** modify `lib/nutrition.ts`, `lib/nutrition.test.ts`.
+- **Interfaces:** consumes Task 1 (`lastSevenDays`, `goalMet`, types `Day`, `DayMeal`). Produces:
+  ```ts
+  export function buildWeek(
+    rows: { id: string; eaten_on: string; logged_at: string; items: MealItem[] }[],
+    today: string, timeZone: string, calorieTarget: number | null,
+  ): Day[]; // always length 7, oldest → newest
   ```
-- [ ] Create the migration with exactly this SQL (verified on a local stack):
-
-```sql
--- Validates one meal's items array; items are the source of truth for meal totals.
--- CASE forces evaluation order so casts never see non-numbers (string -> 23514, not 22P02).
-create function public.meal_items_valid(items jsonb)
-returns boolean
-language sql
-immutable
-set search_path = ''
-as $$
-  select case
-    when jsonb_typeof(items) is distinct from 'array' then false
-    when jsonb_array_length(items) not between 1 and 30 then false
-    else not exists (
-      select 1
-      from jsonb_array_elements(items) as i(item)
-      where case
-        when jsonb_typeof(item) <> 'object' then true
-        when jsonb_typeof(item -> 'name') is distinct from 'string' then true
-        when char_length(btrim(item ->> 'name')) not between 1 and 80 then true
-        else exists (
-          select 1
-          from (values ('grams', 5000), ('calories', 10000), ('protein_g', 1000), ('carbs_g', 1000), ('fat_g', 1000)) as f(k, max_v)
-          where case
-            when jsonb_typeof(item -> f.k) is distinct from 'number' then true
-            else (item ->> f.k)::numeric not between 0 and f.max_v
-          end
-        )
-      end
-    )
-  end
-$$;
-
-create table public.daily_targets (
-  user_id uuid primary key default auth.uid() references auth.users (id) on delete cascade,
-  calorie_target integer not null check (calorie_target between 1 and 10000),
-  protein_target_g integer not null check (protein_target_g between 0 and 1000),
-  carbs_target_g integer not null check (carbs_target_g between 0 and 1000),
-  fat_target_g integer not null check (fat_target_g between 0 and 1000)
-);
-
-create table public.meals (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
-  eaten_on date not null,
-  logged_at timestamptz not null default now(),
-  items jsonb not null check (public.meal_items_valid(items))
-);
-
-create index meals_user_id_eaten_on_idx on public.meals (user_id, eaten_on desc, logged_at desc);
-
-alter table public.daily_targets enable row level security;
-alter table public.meals enable row level security;
-
--- Supabase no longer auto-grants new public tables (changelog 45329); grant least privilege explicitly.
-revoke all on public.daily_targets, public.meals from anon, authenticated;
-grant select, insert, update on public.daily_targets to authenticated;
-grant select, insert on public.meals to authenticated;
-
-create policy daily_targets_select_own on public.daily_targets
-  for select to authenticated using ((select auth.uid()) = user_id);
-create policy daily_targets_insert_own on public.daily_targets
-  for insert to authenticated with check ((select auth.uid()) = user_id);
-create policy daily_targets_update_own on public.daily_targets
-  for update to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
-create policy meals_select_own on public.meals
-  for select to authenticated using ((select auth.uid()) = user_id);
-create policy meals_insert_own on public.meals
-  for insert to authenticated with check ((select auth.uid()) = user_id);
-```
-
-- [ ] Create `supabase/tests/rls_and_constraints.test.sql` with exactly this content (17 assertions; passed in the dry-run):
-
-```sql
-begin;
-select plan(17);
-
-insert into auth.users (id, email) values
-  ('11111111-1111-1111-1111-111111111111', 'a@example.test'),
-  ('22222222-2222-2222-2222-222222222222', 'b@example.test');
-
-set local role authenticated;
-select set_config('request.jwt.claims', '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated"}', true);
-
-select lives_ok($$ insert into public.meals (id, eaten_on, items) values ('aaaaaaaa-0000-0000-0000-000000000001', '2026-10-20', '[{"name":"Rice","grams":150,"calories":195,"protein_g":4,"carbs_g":42,"fat_g":0.4}]') $$, 'A inserts own meal');
-select lives_ok($$ insert into public.meals (id, eaten_on, items) values ('aaaaaaaa-0000-0000-0000-000000000001', '2026-10-20', '[{"name":"Rice","grams":150,"calories":195,"protein_g":4,"carbs_g":42,"fat_g":0.4}]') on conflict (id) do nothing $$, 'retry with same id is a no-op');
-select is((select count(*) from public.meals), 1::bigint, 'exactly one row after retry');
-select throws_ok($$ insert into public.meals (eaten_on, items, user_id) values ('2026-10-20', '[{"name":"x","grams":1,"calories":1,"protein_g":0,"carbs_g":0,"fat_g":0}]', '22222222-2222-2222-2222-222222222222') $$, '42501', null, 'A cannot insert a meal for B (WITH CHECK)');
-select throws_ok($$ insert into public.meals (eaten_on, items) values ('2026-10-20', '[]') $$, '23514', null, 'empty items rejected');
-select throws_ok($$ insert into public.meals (eaten_on, items) values ('2026-10-20', '[{"name":"x","grams":"12","calories":1,"protein_g":0,"carbs_g":0,"fat_g":0}]') $$, '23514', null, 'string number rejected without cast error');
-select throws_ok($$ insert into public.meals (eaten_on, items) values ('2026-10-20', '[{"name":"x","grams":1,"calories":10001,"protein_g":0,"carbs_g":0,"fat_g":0}]') $$, '23514', null, 'calories above 10000 rejected');
-select throws_ok($$ insert into public.meals (eaten_on, items) values ('2026-10-20', '[{"name":"x","grams":1,"calories":1,"protein_g":0,"carbs_g":0}]') $$, '23514', null, 'missing fat_g rejected');
-select throws_ok($$ insert into public.meals (eaten_on, items) values ('2026-10-20', '{"name":"x"}') $$, '23514', null, 'non-array rejected');
-select lives_ok($$ insert into public.daily_targets (calorie_target, protein_target_g, carbs_target_g, fat_target_g) values (10000, 1000, 0, 0) on conflict (user_id) do update set calorie_target = excluded.calorie_target $$, 'A upserts targets at boundary');
-select throws_ok($$ insert into public.daily_targets (calorie_target, protein_target_g, carbs_target_g, fat_target_g) values (0, 0, 0, 0) on conflict (user_id) do update set calorie_target = excluded.calorie_target $$, '23514', null, 'calorie_target 0 rejected');
-select throws_ok($$ delete from public.meals $$, '42501', null, 'no delete privilege');
-select throws_ok($$ update public.daily_targets set user_id = '22222222-2222-2222-2222-222222222222' $$, '42501', null, 'A cannot hand targets row to B (UPDATE WITH CHECK)');
-
-select set_config('request.jwt.claims', '{"sub":"22222222-2222-2222-2222-222222222222","role":"authenticated"}', true);
-select is((select count(*) from public.meals), 0::bigint, 'B cannot see A meals');
-select is((select count(*) from public.daily_targets), 0::bigint, 'B cannot see A targets');
-update public.daily_targets set calorie_target = 5;
-select set_config('request.jwt.claims', '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated"}', true);
-select is((select calorie_target from public.daily_targets), 10000, 'B update did not touch A targets (USING)');
-
-reset role;
-set local role anon;
-select throws_ok($$ select * from public.meals $$, '42501', null, 'anon has no table privilege');
-
-select * from finish();
-rollback;
-```
-
-**Acceptance criteria:**
-- `AC-2.1` The migration applies on a fresh DB. **Verify:** `npm run db:start && npx supabase db reset` → exit 0, and the output includes `Applying migration 20261020000000_nutrition_mvp.sql`.
-- `AC-2.2` RLS isolation, WITH CHECK on insert and update, retry idempotency (FC-08), and DB validation boundaries (FC-04/FC-28) hold against real Postgres. **Verify:** `npm run db:test` → `Tests=17`, `Result: PASS`.
-- `AC-2.3` An anonymous REST read is refused. **Verify:** `curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:54321/rest/v1/meals?select=id" -H "apikey: $(grep PUBLISHABLE .env.local | cut -d= -f2 | tr -d '"')"` → `401` (body code `42501`). Run `npm run env:local` first.
-- `AC-2.4` No destructive DDL (FC-03). **Verify:** `grep -nE 'DROP|TRUNCATE|ALTER .* TYPE|CASCADE' supabase/migrations/*.sql` → no output (`on delete cascade` is lowercase FK syntax and is not a hit).
-- `AC-2.5` The production apply is listed as a human step. **Inspect:** this plan's H2 exists. QA never runs it.
-
-### Task 3: Domain library: limits, schemas, totals, dates  `[judgment]`
-
-**Files:** create `lib/nutrition.ts`, `lib/nutrition.test.ts`, `lib/dates.ts` and `lib/dates.test.ts`.
-
-**Interfaces produced:**
-- `lib/nutrition.ts`:
-  - `MAX_IMAGE_BYTES = 1_500_000`; `IMAGE_TYPES = ['image/jpeg','image/png','image/webp'] as const`; `MAX_ITEMS = 30`; `NAME_MAX = 80`;
-  - `ITEM_MAX = { grams: 5000, calories: 10000, protein_g: 1000, carbs_g: 1000, fat_g: 1000 } as const`;
-  - `TARGET_LIMITS = { calorie_target: [1, 10000], protein_target_g: [0, 1000], carbs_target_g: [0, 1000], fat_target_g: [0, 1000] } as const`.
-- Schemas (zod 4):
-  - `MealItemSchema`: `name: z.string().min(1).max(NAME_MAX).refine(s => s.trim().length > 0)`; each numeric key is `z.number().min(0).max(ITEM_MAX[k])`;
-  - `AnalysisSchema = z.object({ items: z.array(MealItemSchema).max(MAX_ITEMS), confidence: z.enum(['high','medium','low']) })`;
-  - `SaveMealSchema = z.object({ id: z.uuid(), items: z.array(MealItemSchema).min(1).max(MAX_ITEMS) })`;
-  - `TargetsSchema`: each key is `z.coerce.number().int().min(lo).max(hi)`.
-  - No `.transform`/`.preprocess` in `AnalysisSchema`, because `z.toJSONSchema` must accept it.
-  - `type MealItem = z.infer<typeof MealItemSchema>`.
-- Functions:
-  - `sumItems(items: MealItem[]): { calories: number; protein_g: number; carbs_g: number; fat_g: number }`, raw sums;
-  - `fmt(n: number): string`, which is `String(Math.round(n))`;
-  - `groupByDay<T extends { eaten_on: string; items: MealItem[] }>(meals: T[]): { date: string; meals: T[]; totals: ReturnType<typeof sumItems> }[]`, which keeps input order.
-- `lib/dates.ts`:
-  - `resolveTimeZone(raw: string | undefined): string` returns `raw` if it is ≤ 64 chars and `new Intl.DateTimeFormat('en-US', { timeZone: raw })` doesn't throw; otherwise `'UTC'`;
-  - `localDate(timeZone: string, now = new Date()): string` returns `YYYY-MM-DD` via `Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' })`;
-  - `addDays(date: string, n: number): string` does UTC arithmetic on `YYYY-MM-DD`;
-  - `TZ_COOKIE = 'tz'`.
-
-**Steps:**
-- [ ] Write the tests first (RED), then the implementation.
-- [ ] `nutrition.test.ts` asserts:
-  - `sumItems` on `[{calories:72.4, protein_g:6.3, carbs_g:0.4, fat_g:4.8, …}, {calories:195, protein_g:4, carbs_g:42, fat_g:0.4, …}]` → `{calories:267.4, protein_g:10.3, carbs_g:42.4, fat_g:5.2}` (`toBeCloseTo`);
-  - `sumItems([])` → all 0;
-  - `fmt(0.5)` → `'1'`;
-  - `MealItemSchema` accepts boundary values (grams 5000, calories 10000, name of 80 chars);
-  - it rejects 5000.01 grams, a negative value, a whitespace-only name, an 81-char name, `null` grams and a missing `fat_g`;
-  - `SaveMealSchema` rejects `[]` and 31 items;
-  - `TargetsSchema` accepts `'10000'` and rejects `'0'` calories, `'1001'` protein and `'12.5'`;
-  - `z.toJSONSchema(AnalysisSchema)` does not throw;
-  - `groupByDay` on 3 meals across 2 dates gives 2 groups with correct totals.
-- [ ] `dates.test.ts` asserts:
-  - `localDate('Asia/Manila', new Date('2026-10-19T23:30:00Z'))` → `'2026-10-20'`;
-  - `localDate('America/Los_Angeles', same)` → `'2026-10-19'`;
-  - `resolveTimeZone('Not/AZone')` → `'UTC'`;
-  - `resolveTimeZone(undefined)` → `'UTC'`;
-  - `resolveTimeZone('Europe/Berlin')` → `'Europe/Berlin'`;
-  - `addDays('2026-03-01', -1)` → `'2026-02-28'`;
-  - `addDays('2026-10-20', -29)` → `'2026-09-21'`.
-
-**Acceptance criteria:**
-- `AC-3.1` Totals are correct for decimal, multi-item and empty data (FC-17). **Verify:** `npx vitest run lib/nutrition.test.ts` → all pass. QA sees it fail with the implementation stashed (FC-25).
-- `AC-3.2` "Today" is the user's local date across a UTC day boundary (FC-27, frozen `now`). **Verify:** `npx vitest run lib/dates.test.ts` → all pass.
-- `AC-3.3` The limits match the SQL (FC-05). **Inspect:** the numbers in `ITEM_MAX`, `TARGET_LIMITS`, `MAX_ITEMS` and `NAME_MAX` equal those in `supabase/migrations/20261020000000_nutrition_mvp.sql`.
-- `AC-3.4` **Verify:** `npm run typecheck` → exit 0.
-
-### Task 4: Auth: Supabase clients, proxy, login, confirm, sign-out, app shell, tz sync, e2e harness  `[judgment]`
-
-**Files:**
-- create `lib/supabase/server.ts`, `proxy.ts`, `components/time-zone-sync.tsx`;
-- create `app/login/page.tsx`, `app/login/login-form.tsx`, `app/login/actions.ts`;
-- create `app/auth/confirm/route.ts`, `app/auth/signout/route.ts`, `app/(app)/layout.tsx`;
-- create `playwright.config.ts`, `e2e/global-setup.ts`, `e2e/helpers/auth.ts`, `e2e/auth.spec.ts`;
-- modify `app/layout.tsx`.
-
-**Interfaces produced:**
-- `createClient(): Promise<SupabaseClient>`: the server client, built per the current `@supabase/ssr` 0.12 Next.js guide (verify at build). It uses `createServerClient(url, publishableKey, { cookies: { getAll, setAll } })` with `cookies()` from `next/headers`, and `setAll` is wrapped in try/catch for Server Components.
-- `requireUser(): Promise<{ supabase: SupabaseClient; userId: string }>` calls `supabase.auth.getClaims()` and, if there are no claims, `redirect('/login')`.
-- `getToday(): Promise<{ timeZone: string; date: string }>` reads the `tz` cookie via `resolveTimeZone` and `localDate`.
-
-**Steps:**
-- [ ] `proxy.ts`:
-  - `export async function proxy(request: NextRequest)` builds `createServerClient` with request/response cookie `getAll`/`setAll` (including applying the `headers` argument `setAll` receives to the response, per the 0.12 guide) and awaits `supabase.auth.getClaims()`;
-  - no claims and the path is not `/login`, not `/auth/*` and not `/api/*` → redirect to `/login`. API routes return their own 401;
-  - claims present and path `/login` → redirect to `/`;
-  - `config.matcher = ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)']`.
-- [ ] `app/login/actions.ts`: `sendMagicLink(prev, formData)` validates the email with `z.email().max(254)`, then calls `signInWithOtp({ email, options: { shouldCreateUser: true } })` and returns `{ ok: true } | { error }`. Login form copy is verbatim from Impact call-outs. Use `useActionState`. The button is disabled with text unchanged while pending. Status messages use `role="status"`, errors `role="alert"`.
-- [ ] `app/auth/confirm/route.ts` GET:
-  - reads `token_hash` and `type`;
-  - when `type === 'email'`, calls `verifyOtp({ type: 'email', token_hash })` and on success redirects to `/`;
-  - anything else redirects to `/login?error=link`;
-  - accepts no `next` parameter (no open redirect).
-- [ ] `app/auth/signout/route.ts` POST: `signOut()` → 303 to `/login`. The nav uses `<form action="/auth/signout" method="post"><button>Sign out</button></form>`.
-- [ ] `app/(app)/layout.tsx`: `await requireUser()`, then a header nav with links `Today` (`/`), `History`, `Settings` and the sign-out form. Use `<nav aria-label="Main">`.
-- [ ] `components/time-zone-sync.tsx` (`'use client'`):
-  - on mount and on `visibilitychange` → visible, compares `Intl.DateTimeFormat().resolvedOptions().timeZone` with the `tz` cookie;
-  - if they differ, sets `tz=<encoded>; path=/; max-age=31536000; samesite=lax` and calls `router.refresh()`;
-  - renders `null`; it is rendered in the root `app/layout.tsx`.
-- [ ] `playwright.config.ts`:
-  - `testDir: 'e2e'`, `globalSetup: './e2e/global-setup.ts'`;
-  - `use: { baseURL: 'http://127.0.0.1:3000', timezoneId: 'Asia/Manila' }`;
-  - `webServer: { command: 'npm run dev -- --hostname 127.0.0.1 --port 3000', url: 'http://127.0.0.1:3000/login', reuseExistingServer: true }`;
-  - projects: `chromium` only.
-- [ ] `e2e/global-setup.ts`: `process.loadEnvFile('.env.local')`. Throw unless `NEXT_PUBLIC_SUPABASE_URL === 'http://127.0.0.1:54321'` (FC-23). Throw unless `fetch('http://127.0.0.1:54324/api/v1/messages')` is ok.
-- [ ] `e2e/helpers/auth.ts`: `signIn(page, email = \`e2e-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test\`)`:
-  - fills `/login` and submits;
-  - polls `GET http://127.0.0.1:54324/api/v1/search?query=to:<email>` (≤ 10 s) for `messages[0].ID`;
-  - fetches `/api/v1/message/<ID>` and extracts the first `href` from `.HTML` (HTML-unescape `&amp;`);
-  - `page.goto(href)`, waits for URL `/`, and returns the email.
-- [ ] `e2e/auth.spec.ts` tests:
-  - (a) unauthenticated `/`, `/log`, `/history` and `/settings` each end at `/login`;
-  - (b) the full magic-link sign-in lands on `/` with heading `Today`;
-  - (c) `/auth/confirm?token_hash=bogus&type=email` → `/login?error=link` showing the invalid-link copy;
-  - (d) after `Sign out`, `/` redirects to `/login`;
-  - (e) an authenticated visit to `/login` redirects to `/`;
-  - (f) the `tz` cookie equals `Asia/Manila` after the first load.
-
-**Acceptance criteria:**
-- `AC-4.1` Protected routes redirect anonymous users. **Verify:** `npx playwright test e2e/auth.spec.ts -g "redirect"` → pass.
-- `AC-4.2` Magic-link sign-in works end-to-end through `token_hash`, and bad links show `That sign-in link is invalid or expired. Request a new one.` **Verify:** `npx playwright test e2e/auth.spec.ts` → all pass.
-- `AC-4.3` Login states: the button is disabled while pending, success is `role=status`, error is `role=alert`, and the input has its visible label `Email` (FC-21). **Verify:** included in `e2e/auth.spec.ts` via `getByLabel('Email')` and `getByRole('status')`.
-- `AC-4.4` Auth is checked server-side in every protected entry point, not only in the proxy (FC-13; Next 16 guidance). **Inspect:** `grep -rn "getClaims\|requireUser" app proxy.ts` shows a hit in `proxy.ts`, `app/(app)/layout.tsx`, every `actions.ts` except login, and `app/api/analyze/route.ts`.
-- `AC-4.5` The tz cookie is set and refreshed. **Verify:** auth spec (f).
-- `AC-4.6` E2E refuses a non-local Supabase (FC-23). **Verify:** `NEXT_PUBLIC_SUPABASE_URL=https://x.supabase.co npx playwright test e2e/auth.spec.ts` → fails in global setup.
-- `AC-4.7` No service-role or secret key is used. **Verify:** `grep -rniE "service_role|SERVICE_ROLE|SECRET_KEY|sb_secret" --include=*.ts --include=*.tsx . --exclude-dir=node_modules` → no output.
-- `AC-4.8` **Verify:** `npm run lint && npm run typecheck` → exit 0.
-
-### Task 5: `/api/analyze` with Groq vision (JSON mode + server validation)  `[judgment]`
-
-**Files:** create `lib/analyze.ts`, `lib/analyze.test.ts`, `app/api/analyze/route.ts` and `app/api/analyze/route.test.ts`.
-
-**Interfaces:**
-- Consumes `AnalysisSchema`, `MAX_IMAGE_BYTES` and `IMAGE_TYPES` (Task 3), and `createClient` (Task 4).
-- Produces:
-  - `ANALYZE_MODEL = 'qwen/qwen3.8-27b'`, a Groq **preview** model. This constant is the only place the ID appears;
-  - `getGroq(): Groq`, which returns `new Groq({ timeout: 30_000, maxRetries: 0 })` and reads `GROQ_API_KEY`. Retries are off so the SDK doesn't sit out a daily-quota `retry-after`; the user has `Try again`;
-  - `analyzeMeal(client: Groq, image: { data: string; mediaType: (typeof IMAGE_TYPES)[number] }): Promise<{ ok: true; data: z.infer<typeof AnalysisSchema> } | { ok: false; status: 413 | 422 | 429 | 502; error: string }>`.
-
-**Steps:**
-- [ ] `analyzeMeal` calls `client.chat.completions.create` with:
-  - `model: ANALYZE_MODEL`, `temperature: 0.2`, `max_completion_tokens: 2048`;
-  - `response_format: { type: 'json_object' }`;
-  - `messages`: a system message whose content is the system prompt below + `'\n\nRespond with only a JSON object that matches this JSON Schema:\n' + JSON.stringify(z.toJSONSchema(AnalysisSchema))`, then a user message whose content is `[{ type: 'text', text: 'Estimate the food items in this photo.' }, { type: 'image_url', image_url: { url: `data:${mediaType};base64,${data}` } }]`.
-
-  System prompt (exact text):
-
-  > You estimate nutrition from a single meal photo. List each distinct food item you can see with an estimated portion in grams and its calories, protein, carbs and fat for that portion. Estimate portions from visual cues such as plate size, utensils and packaging. Always return your best estimate. Use confidence "low" when the image is ambiguous, blurry, partly hidden, or not clearly food; "medium" when portions are uncertain; "high" only when items and portions are clear. If the photo contains no food, return an empty items array with confidence "low".
-
-  Architect's call: use JSON mode, not strict `json_schema` and not tool use. Groq documents JSON mode with image input for this model, but not structured outputs with images. The upgrade path, once H7 confirms a real image call works, is `response_format: { type: 'json_schema', json_schema: { name: 'meal_analysis', strict: true, schema } }`. Strict mode requires every property in `required` and `additionalProperties: false`. That upgrade is not part of the MVP.
-- [ ] Server-side validation (unchanged in intent):
-  - `choices[0].finish_reason !== 'stop'` → 502;
-  - `message.content` null or empty → 502;
-  - `JSON.parse` (throw → 502);
-  - if `confidence` is a string, lowercase it;
-  - `AnalysisSchema.safeParse` (fail → 502).
-- [ ] Error mapping. groq-sdk uses Stainless-style error classes; check the names at build: `Groq.RateLimitError`, `Groq.BadRequestError`, `Groq.NotFoundError`, `Groq.APIError`.
-  - `RateLimitError`:
-    - `Number(err.headers?.get('retry-after')) > 60` → 429 with the daily-quota copy;
-    - otherwise → 429 with the busy copy.
-  - `APIError` with `status === 413` → 413 with the too-large copy.
-  - `BadRequestError` whose error body code is `json_validate_failed` → 502. Check the body path at build; it is expected at `err.error?.error?.code`.
-  - Any other `BadRequestError` → 422.
-  - `NotFoundError`, or an error code `model_not_found`/`model_decommissioned` → 502, plus `console.error('groq model unavailable', ANALYZE_MODEL)`.
-  - Anything else (missing key, timeout, connection) → 502.
-  - Never log image data.
-- [ ] `route.ts`: `export const maxDuration = 60`. `POST(request: Request)`:
-  1. `getClaims()` → 401;
-  2. `content-length` > 1_700_000 → 413;
-  3. `await request.formData()` inside try (throw → 400);
-  4. `image` not a `File` → 400;
-  5. type not in `IMAGE_TYPES` → 415;
-  6. `size === 0` → 400, `size > MAX_IMAGE_BYTES` → 413;
-  7. `Buffer.from(await file.arrayBuffer()).toString('base64')` → `analyzeMeal(getGroq(), …)`;
-  8. return `{ error }` or the data, with the status from `analyzeMeal`.
-
-  The copy is verbatim from Impact call-outs.
-- [ ] `lib/analyze.test.ts` uses a **real** groq-sdk client with an injected fetch: `new Groq({ apiKey: 'test', maxRetries: 0, fetch: fakeFetch })`. Check at build that 1.6.0 accepts `fetch`; if not, use `vi.stubGlobal('fetch', fakeFetch)`. `fakeFetch` records the request. Its default response is `{ id: 'chatcmpl-test', object: 'chat.completion', created: 0, model: 'qwen/qwen3.8-27b', choices: [{ index: 0, message: { role: 'assistant', content: JSON.stringify(payload) }, finish_reason: 'stop', logprobs: null }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }`. Cases:
-  - valid payload → ok;
-  - `"confidence":"Low"` → ok with `'low'`;
-  - calories 20000 → 502;
-  - non-JSON content → 502;
-  - `finish_reason: 'length'` → 502;
-  - `content: null` → 502;
-  - HTTP 429 with `retry-after: 7` → 429 with the busy copy;
-  - HTTP 429 with `retry-after: 3600` → 429 with the daily copy;
-  - HTTP 413 → 413;
-  - HTTP 400 with body `{"error":{"code":"json_validate_failed","message":"x"}}` → 502;
-  - other HTTP 400 → 422;
-  - HTTP 404 → 502;
-  - HTTP 500 → 502.
-
-  The recorded body must have `model === 'qwen/qwen3.8-27b'`, `response_format.type === 'json_object'`, a system message containing `"confidence"`, exactly 2 messages, and one `image_url` part whose `url` starts with `data:image/jpeg;base64,`.
-- [ ] `route.test.ts` uses `vi.mock('@/lib/supabase/server')` (claims present or absent) and `vi.mock('@/lib/analyze', …)`, keeping the real constants and stubbing `getGroq`/`analyzeMeal`. Cases:
-  - 401 without claims;
-  - 400 for a JSON body;
-  - 400 when the field is missing;
-  - 415 for `text/plain`;
-  - 413 for a 1_500_001-byte File;
-  - 200 passthrough for a valid jpeg;
-  - 429 passthrough of `analyzeMeal`'s status and copy.
-
-**Acceptance criteria:**
-- `AC-5.1` The model ID and request shape are pinned: one image as a data URL, JSON mode, schema in the system prompt. **Verify:** `npx vitest run lib/analyze.test.ts` → pass (asserts the recorded request).
-- `AC-5.2` Model output is validated on the server: out-of-range, malformed, truncated and `json_validate_failed` output each give 502, never a 500 or an unvalidated passthrough. **Verify:** same test file.
-- `AC-5.3` Boundary inputs return 4xx, not 5xx (FC-04): missing field, wrong type, empty file, oversize file, no session. **Verify:** `npx vitest run app/api/analyze/route.test.ts` → pass.
-- `AC-5.4` Quota and size failures give distinct, useful messages: busy, daily limit, too large (R-2). **Verify:** `npx vitest run lib/analyze.test.ts -t "429|413"` → pass.
-- `AC-5.5` No Groq network call or real key in tests. **Verify:** `env -u GROQ_API_KEY npm test` → pass.
-- `AC-5.6` The key never reaches the client. **Verify:** `npm run build && grep -rl "GROQ_API_KEY\|api.groq.com" .next/static` → no output, and `grep -rn "NEXT_PUBLIC_GROQ" --include=*.ts --include=*.tsx . --exclude-dir=node_modules` → no output.
-- `AC-5.7` Preview-model churn is contained (R-1). **Verify:** `grep -rln "qwen/qwen3.8-27b" app lib` → only `lib/analyze.ts` and `lib/analyze.test.ts`; the HTTP 404 case maps to 502.
-- `AC-5.8` Tests were seen failing. **Verify (QA):** `git stash` `lib/analyze.ts` → tests fail; restore → pass (FC-25).
-
-### Task 6: Settings: daily targets  `[judgment]`
-
-**Files:** create `app/(app)/settings/page.tsx`, `app/(app)/settings/targets-form.tsx`, `app/(app)/settings/actions.ts` and `e2e/settings.spec.ts`.
-
-**Interfaces:**
-- Consumes `requireUser` and `TargetsSchema`/`TARGET_LIMITS`.
-- Produces `saveTargets(prev, formData): Promise<{ ok: true } | { error: string }>`.
-
-**Steps:**
-- [ ] The page loads `daily_targets` with `.select('calorie_target, protein_target_g, carbs_target_g, fat_target_g').maybeSingle()` and prefills the form. When there is no row, the fields are empty.
-- [ ] Form fields:
-  - four `<input type="number" inputMode="numeric" step="1" required>`, each with `min`/`max` taken from `TARGET_LIMITS`;
-  - visible `<label>`s verbatim;
-  - submit `Save targets`, disabled while pending.
-  - Success shows `Targets saved.` (`role="status"`); errors use `role="alert"`.
-  - The success or error message clears on the next submit.
-- [ ] Action:
-  1. `requireUser`;
-  2. `TargetsSchema.safeParse(Object.fromEntries(formData))` (fail → `Some values are out of range.`);
-  3. `supabase.from('daily_targets').upsert({ user_id: userId, ...data })`; error → `Couldn't save targets. Try again.`;
-  4. `revalidatePath('/')`.
-- [ ] `e2e/settings.spec.ts`:
-  - sign in; save 2000/150/200/70; reload; the values persist;
-  - save again (idempotent upsert); still one row, same values;
-  - bypass client validation via `page.evaluate` removing `min`/`max`, submit `0` calories → the alert shows `Some values are out of range.`, not a crash.
-
-**Acceptance criteria:**
-- `AC-6.1` A user sets targets, and they persist and prefill. **Verify:** `npx playwright test e2e/settings.spec.ts` → pass.
-- `AC-6.2` Server validation boundary: out-of-range values posted around the client give a 4xx-style inline error, never a 500 (FC-04). **Verify:** same spec.
-- `AC-6.3` Client `min`/`max` equal the server/DB limits (FC-05). **Inspect:** `targets-form.tsx` reads `TARGET_LIMITS`, with no literal numbers.
-- `AC-6.4` States: pending disables the button; success (`role=status`) and error (`role=alert`) are separate and don't survive the next submit (FC-12/21). **Verify:** same spec.
-- `AC-6.5` Retry/idempotency: a double submit leaves one row. **Verify:** `npm run db:test` covers the upsert path; the spec checks values after two saves.
-
-### Task 7: Log meal: capture, compress, analyze, review/edit, save  `[judgment]`
-
-**Files:**
-- create `lib/compress-image.ts`, `app/(app)/log/page.tsx`, `app/(app)/log/meal-logger.tsx` (`'use client'`), `app/(app)/log/actions.ts`;
-- create `e2e/log-meal.spec.ts` and `e2e/fixtures/meal.jpg` (a real JPEG of about 1200×800, ≤ 200 KB, committed; generate it once with any tool).
-
-**Interfaces:**
-- Consumes the analyze contract (Task 5), `SaveMealSchema`, `sumItems`, `fmt`, `ITEM_MAX`, `NAME_MAX`, `MAX_ITEMS`, `MAX_IMAGE_BYTES` and `getToday`.
-- Produces:
-  - `compressImage(file: File): Promise<Blob>`: `createImageBitmap(file)` → canvas with long edge ≤ 1568 → `toBlob('image/jpeg', 0.8)`. If the result is > `MAX_IMAGE_BYTES`, retry at 0.6. If it is still too big, throw `Error('too-large')`.
-  - `saveMeal(input: { id: string; items: MealItem[] }): Promise<{ error: string }>`, which redirects on success.
-
-**Steps:**
-- [ ] Client state machine in `meal-logger.tsx`: `idle | analyzing | review | analyzeError`, plus separate `saveError` and `saving` flags.
-- [ ] `idle`: a `<button type="button">Snap meal</button>` triggers a hidden `<input type="file" accept="image/*" capture="environment">`.
-- [ ] `analyzing`: shows `Analyzing your meal…` in `role="status" aria-live="polite"`.
-  - Each new pick aborts the previous request through one `AbortController` ref and bumps a request counter. A response whose counter is stale is ignored (FC-09/10).
-  - Unmount aborts.
-- [ ] `analyzeError`: shows the API's `error` text in `role="alert"` (a compress failure shows the 413 copy) and buttons `Try again` (re-posts the same compressed blob) and `Enter manually` (review with one empty item).
-- [ ] `review`:
-  - `mealId = crypto.randomUUID()` is created **once when review is entered**. It is kept across edits and save retries, and replaced only on `Retake` or a new pick (FC-08).
-  - The banner `Rough estimate — tap any item to adjust.` shows when `confidence === 'low'`. The disclaimer is always shown. `No food detected. Add items manually.` shows when the analysis returned 0 items.
-  - Each item is a `<fieldset>` with a `<legend>` (item name or `Item n`) holding the six labelled inputs:
-    - name has `maxLength={NAME_MAX}` and `required`;
-    - numbers are `type="number" step="any" min=0 max={ITEM_MAX[k]} required`.
-  - Each item has a `Remove` button. `Add item` is disabled at `MAX_ITEMS`.
-  - Live totals use `sumItems`/`fmt`.
-  - `Log meal` is disabled while saving (text `Saving…`) or when there are 0 items. `Retake` returns to idle.
-- [ ] Save: the action:
-  1. `requireUser`;
-  2. `SaveMealSchema.safeParse`;
-  3. `eaten_on = (await getToday()).date`;
-  4. `supabase.from('meals').insert({ id, user_id: userId, eaten_on, items })`. Error code `'23505'` counts as success; `'23514'` or a validation failure returns the out-of-range copy; anything else returns the generic copy;
-  5. `revalidatePath('/')`, `revalidatePath('/history')`, then `redirect('/')`.
-
-  A save error shows in its own `role="alert"`, separate from the analyze error (FC-12), and clears on the next attempt.
-- [ ] `e2e/log-meal.spec.ts`. Every test mocks `/api/analyze` in the browser with `page.route`; the real route has unit coverage. Cases:
-  - (a) happy path: pick `meal.jpg` → mocked 200 with 2 items → edit the first item's calories → the live total updates → `Log meal` → lands on `/` and the total includes the edit;
-  - (b) low confidence → the banner text is visible;
-  - (c) mocked 502 → the alert shows its copy; `Enter manually` → add a name and numbers → save works;
-  - (d) idempotent retry: a `page.route` on the Server Action POST lets the first request reach the server but aborts the response (`route.fetch()` then `route.abort()`); click `Log meal` again → exactly one meal exists for that id (assert via the `/` meal count);
-  - (e) race: hold the first `/api/analyze` request in flight (unresolved route promise), pick a second photo, resolve the second with item `B` and then the first with item `A` → only `B` is shown;
-  - (f) `page.locator('button button, [role=button] [role=button]')` count is 0;
-  - (g) at a 320×568 viewport, `document.documentElement.scrollWidth <= 320` in review with an 80-char item name.
-
-**Acceptance criteria:**
-- `AC-7.1` Snap → review → save works, and the user lands on Today with the meal counted. **Verify:** `npx playwright test e2e/log-meal.spec.ts -g "happy"`.
-- `AC-7.2` Copy is verbatim (FC-14). **Verify:** `grep -F "Analyzing your meal…" app -r && grep -F "Rough estimate — tap any item to adjust." app -r && grep -F "Log meal" app -r` → each matches.
-- `AC-7.3` Edits re-total live, and the saved payload carries the edited values (FC-11/17). **Verify:** spec (a).
-- `AC-7.4` A retry after a lost response leaves exactly one row (FC-08). **Verify:** spec (d); plus `npm run db:test` (duplicate id).
-- `AC-7.5` A stale analysis response never overwrites a newer pick, and abort happens on unmount (FC-09/10/26). **Verify:** spec (e).
-- `AC-7.6` Server boundaries: out-of-range or `null` values posted around the client give the inline out-of-range error, never a 500 (FC-04). **Verify:** a spec case that removes `max` via `page.evaluate`, sets calories to 20000, saves, and sees the alert.
-- `AC-7.7` Client limits come from the shared constants (FC-05). **Inspect:** `meal-logger.tsx` has no literal 5000/10000/1000/80/30.
-- `AC-7.8` States are complete: analyzing (status), analyze error (alert + Try again + Enter manually), empty (0 items), saving (disabled, `Saving…`) and save error (a separate alert). Every input has a label (FC-12/21). **Verify:** specs (b), (c) and (a).
-- `AC-7.9` No nested interactive elements; no horizontal scroll at 320 px (FC-18/20). **Verify:** specs (f) and (g).
-
-### Task 8: Today dashboard  `[judgment]`
-
-**Files:** create `app/(app)/page.tsx` and `e2e/today.spec.ts`.
-
-**Interfaces:** consumes `requireUser`, `getToday`, `sumItems`, `fmt`, and the `meals`/`daily_targets` tables.
-
-**Steps:**
-- [ ] A Server Component runs two queries:
-  - `meals.select('id, logged_at, items').eq('eaten_on', date).order('logged_at')`;
-  - `daily_targets…maybeSingle()`.
-- [ ] Render heading `Today` and link `Snap meal` → `/log`.
-- [ ] Kcal block:
-  - with targets: `{fmt(cal)} / {target} kcal` plus `{n} kcal left` or `{n} kcal over`, where n = |target − eaten| rounded;
-  - without targets: `{fmt(cal)} kcal` plus link `Set your daily targets`.
-- [ ] Macro rows `Protein`, `Carbs`, `Fat`: `{eaten} / {target} g`. Each has a `<progress>` with `max = target` and an `aria-label` like `Protein progress`. Without targets they show `{eaten} g` only.
-- [ ] Meal list: time (formatted in `timeZone`) and comma-joined item names. Empty: `No meals logged today.`
-- [ ] A query error shows `role="alert"` `Couldn't load today's meals. Refresh to try again.` (use an `error.tsx` in `app/(app)/`).
-- [ ] `e2e/today.spec.ts`:
-  - a new user sees `No meals logged today.` and `Set your daily targets`;
-  - after setting targets 2000/150/200/70 and logging two meals via the UI (mocked analyze: items 72.4/6.3/0.4/4.8 and 195/4/42/0.4) → `267 / 2000 kcal`, `1733 kcal left`, `10 / 150 g`, `42 / 200 g`, `5 / 70 g`;
-  - nested-interactive count is 0;
-  - 320 px has no horizontal scroll.
-
-**Acceptance criteria:**
-- `AC-8.1` Today's totals and remaining values match a fixture with decimals (FC-17). **Verify:** `npx playwright test e2e/today.spec.ts`.
-- `AC-8.2` "Today" follows the browser's timezone (`Asia/Manila` in e2e), not UTC (FC-27). **Inspect:** the page uses `getToday()`, with no `new Date().toISOString().slice(0,10)` anywhere (`grep -rn "toISOString().slice" app lib` → no output).
-- `AC-8.3` Empty (no meals, no targets), error and accessibility labels on `<progress>` are present (FC-21); no nesting; 320 px OK (FC-18/20). **Verify:** same spec.
-
-### Task 9: History view (last 30 days)  `[judgment]`
-
-**Files:** create `app/(app)/history/page.tsx` and `e2e/history.spec.ts`.
-
-**Interfaces:** consumes `requireUser`, `getToday`, `addDays`, `groupByDay`, `sumItems` and `fmt`.
-
-**Steps:**
-- [ ] Query `meals.select('id, eaten_on, logged_at, items').gte('eaten_on', addDays(date, -29)).order('eaten_on', { ascending: false }).order('logged_at', { ascending: false })`. Add the comment `// shortcut: fixed 30-day window, no pagination; add range paging when users exceed ~1000 meals/30d`.
-- [ ] `groupByDay` → one `<section>` per day:
-  - `<h2>` with the day label: `Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })` on `eaten_on + 'T00:00:00Z'`, so the stored calendar date shows unshifted;
-  - the totals line verbatim;
-  - a meal list with time (in the user's tz) and item names.
-- [ ] Empty: `No meals in the last 30 days.` The error state comes from the shared `app/(app)/error.tsx`.
-- [ ] `e2e/history.spec.ts`:
-  - a new user sees the empty copy;
-  - after logging 2 meals (same mocks as Task 8) one day group shows `267 kcal · P 10 g · C 42 g · F 5 g`;
-  - another user (second `signIn`) sees the empty copy (UI-level isolation);
-  - nested-interactive count is 0; 320 px OK.
-
-**Acceptance criteria:**
-- `AC-9.1` Day groups and totals are correct (FC-17). **Verify:** `npx playwright test e2e/history.spec.ts`.
-- `AC-9.2` A user never sees another user's meals. **Verify:** same spec plus `npm run db:test`.
-- `AC-9.3` Empty and error states; nesting; 320 px (FC-18/20/21). **Verify:** same spec.
-
-### Task 10: Deploy readiness docs and final gate  `[mechanical]`
-
-**Files:** modify `README.md`.
-
-**Steps:**
-- [ ] Add a "Deploy (human steps)" section to `README.md` that copies H1–H6 below verbatim, and a "Deferred" section that copies the deferred list below.
-- [ ] Run the full local gate from Verification commands.
-
-**Acceptance criteria:**
-- `AC-10.1` The full gate is green. **Verify:** the full local gate command sequence → every step exits 0.
-- `AC-10.2` The human steps are documented. **Inspect:** `README.md` contains `supabase db push`, `Confirm signup`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` and `Do not add a service-role or secret key`.
-
-### Task 11: Typography — IBM Plex Sans  `[mechanical]`
-
-Follow-up added after the run, on the short path and approved by the human. It replaces the scaffold's Arial, which the design hook flagged as an overused font.
-
-**Files:** modify `app/layout.tsx`, `app/globals.css`, and the number elements in `app/(app)/page.tsx` and `app/(app)/history/page.tsx` (class names only).
-
-**Steps:**
-- [ ] Load `IBM_Plex_Sans` via `next/font/google` in `app/layout.tsx`: weights 400, 500 and 600, `subsets: ["latin"]`, `display: "swap"`, exposed as the CSS variable `--font-plex-sans` on `<html>`.
-- [ ] In `app/globals.css`, replace the `font-family: Arial…` declaration with `var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif`. If the Tailwind theme defines a sans font token, point it at the same variable.
-- [ ] Apply `tabular-nums` (Tailwind) to the numeric displays only: the Today totals, the remaining figures and the progress labels, and the History per-day totals. Change no copy, colour or layout.
-
-**Acceptance criteria:**
-- `AC-11.1` The font is self-hosted and applied. **Verify:** `npm run build` exits 0. `grep -rn "fonts.googleapis\|fonts.gstatic" .next/static app` finds nothing. The computed `font-family` of `body` on `/login` starts with the Plex family (Playwright `evaluate`).
-- `AC-11.2` Nothing else regressed. **Verify:** lint, typecheck, `npm test` and the full `npx playwright test` all exit 0. At 320px, `/`, `/log`, `/settings` and `/history` have `scrollWidth` 320. No copy string changed (`git diff` touches no text nodes).
-- `AC-11.3` The numbers are tabular. **Inspect:** the Today and History numeric elements carry `tabular-nums`, and no non-numeric text does.
-
-**FC:** FC-14, FC-19, FC-20.
+- **Steps:**
+  - [ ] In `lib/nutrition.ts`, below `groupByDay`: `const byDate = new Map(groupByDay(rows).map((d) => [d.date, d]))`. For each `date` of `lastSevenDays(today)`, build a `Day`:
+    - `weekday`: `Intl.DateTimeFormat("en-US", { weekday: "narrow", timeZone: "UTC" })` of `` new Date(`${date}T00:00:00Z`) `` (e.g. `T`);
+    - `dayNumber`: `{ day: "numeric", timeZone: "UTC" }` (e.g. `20`);
+    - `label`: `{ weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: "UTC" }` (e.g. `Tuesday, October 20, 2026`), plus `", goal met"` when `goalMet`;
+    - `totals`: the group's totals, or all zeros;
+    - `goalMet`: `goalMet(totals.calories, calorieTarget)`;
+    - `meals`: rows in input order (the page orders by `logged_at` ascending) mapped to `DayMeal`: `initial` = first code point of `items[0].name.trim()` uppercased; `names` = `items.map((i) => i.name).join(", ")`; `itemCount` = `items.length`; `kcal` = `Math.round(sumItems(items).calories)`; `time` = `Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit" })` of `logged_at`.
+  - [ ] Hoist the four `Intl.DateTimeFormat` instances out of the loop (one each per call).
+  - [ ] `lib/nutrition.test.ts`, new `describe("buildWeek")` with a fixture: today `2026-10-20`, tz `Asia/Manila`, target 2000; rows: `m1` (`2026-10-20`, `2026-10-19T23:30:00Z`, items Rice 72.4/6.3/0.4/4.8 + Toast 195/4/42/0.4), `m2` (`2026-10-18`, `2026-10-18T04:05:00Z`, one item `" oats"` 1900 kcal). Assert:
+    - length 7; `[0].date === "2026-10-14"`; `[6].date === "2026-10-20"`;
+    - `[6].weekday === "T"`, `[6].dayNumber === "20"`, `[6].label === "Tuesday, October 20, 2026"`;
+    - `[6].meals[0]`: `names === "Rice, Toast"`, `itemCount === 2`, `kcal === 267`, `initial === "R"`, `time` matches `/^7:30\sAM$/` (Manila; ICU may use U+202F);
+    - `[6].totals` rounds to 267/10/42/5; `[6].goalMet === false`;
+    - `[4].goalMet === true`, `[4].label === "Sunday, October 18, 2026, goal met"`, `[4].meals[0].initial === "O"`;
+    - an empty day has zero totals, `meals: []`, `goalMet: false`; with `calorieTarget = null`, `[4].goalMet === false`.
+- **Acceptance criteria:**
+  - `AC-2.1` Displayed totals, names, counts, kcal and times come out right for a two-day fixture (FC-17). — **Verify:** `npx vitest run lib/nutrition.test.ts` → all pass; stash-RED fails.
+  - `AC-2.2` Dates are labelled without tz drift (calendar dates formatted as UTC; times in the user's zone). — **Verify:** the `label`/`time` assertions above pass with `TZ=America/Los_Angeles npx vitest run lib/nutrition.test.ts` too.
+  - `AC-2.3` Existing nutrition behaviour unchanged. — **Verify:** `npm test` → all previous tests still pass.
+
+### Task 3: Theme tokens, motion tokens and the 700 weight  `[mechanical]`
+
+- **Files:** modify `app/globals.css`, `app/layout.tsx`.
+- **Interfaces:** produces Tailwind utilities used by Tasks 4–6: colours `background`, `foreground`, `surface`, `muted`, `track`, `accent`, `accent-strong`, `on-accent`, `macro-protein`, `macro-carbs`, `macro-fat` (as `bg-*`, `text-*`, `stroke-*`, `border-*`, `from-*`, `to-*`, `outline-*`); easings `ease-spring`, `ease-fluid`; animation `animate-meal-in`.
+- **Steps:**
+  - [ ] `app/globals.css`, keep the existing structure (`:root` vars → `@theme inline` → dark media query). Exact values:
+
+    | var | light `:root` | dark `@media (prefers-color-scheme: dark) :root` |
+    |---|---|---|
+    | `--background` | `#f4f5f7` | `#0a0a0a` |
+    | `--foreground` | `#171717` | `#ededed` |
+    | `--surface` | `#ffffff` | `#171717` |
+    | `--muted` | `#5c6370` | `#a1a1aa` |
+    | `--track` | `#e6e8ec` | `#262626` |
+    | `--accent` | `#2563eb` | `#2563eb` |
+    | `--accent-strong` | `#1d4ed8` | `#1d4ed8` |
+    | `--on-accent` | `#ffffff` | `#ffffff` |
+    | `--macro-protein` | `#1d4ed8` | `#3b82f6` |
+    | `--macro-carbs` | `#2563eb` | `#60a5fa` |
+    | `--macro-fat` | `#3b82f6` | `#93c5fd` |
+
+    In `@theme inline` add `--color-<name>: var(--<name>);` for each new var.
+  - [ ] Also in `@theme` (static values):
+    ```css
+    --ease-spring: linear(0, 0.116 6.25%, 0.351 12.5%, 0.590 18.75%, 0.782 25%, 0.913 31.25%, 0.991 37.5%, 1.027 43.75%, 1.038 50%, 1.035 56.25%, 1.027 62.5%, 1.017 68.75%, 1.010 75%, 1.004 81.25%, 1.001 87.5%, 0.999 93.75%, 1);
+    --ease-fluid: cubic-bezier(.32, .72, 0, 1);
+    --animate-meal-in: meal-in 400ms cubic-bezier(.32, .72, 0, 1) both;
+    @keyframes meal-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+    ```
+    (The spring is a damped spring, ζ = 0.72, ω₀ = 15 rad/s, sampled over 590 ms; peak overshoot 3.8 %.)
+  - [ ] `app/layout.tsx`: `weight: ["400", "500", "600", "700"]`. Nothing else.
+- **Acceptance criteria:**
+  - `AC-3.1` Every new pair meets contrast (FC-19). — **Inspect:** Architect's computed ratios, re-checked by QA: light — foreground/background 16.43, muted/background 5.54, muted/surface 6.05, muted/track 4.93, on-accent/accent 5.17, macro-fat/surface 3.68, macro-protein/track 5.46; dark — muted/background 7.72, muted/surface 7.00, muted/track 5.90, on-accent/accent 5.17, macro-protein/surface 4.87, macro-protein/track 4.11. Focus outline on the selected pill uses `on-accent` (5.17 on accent, 6.70 on accent-strong); `foreground` would fail on the gradient's bottom stop in light mode (2.68). Unselected focus uses `foreground` on track (14.61 / 12.93). Text ≥ 4.5, rings/dots/focus ≥ 3.
+  - `AC-3.2` Hex literals live only in the theme file. — **Verify:** `grep -rnE '#[0-9a-fA-F]{3,8}\b' app components --include='*.tsx' --include='*.ts'` → no output.
+  - `AC-3.3` The tokens compile and the font is self-hosted with 700. — **Verify:** `npm run build` → exit 0; `grep -c '"700"' app/layout.tsx` → 1. (Tailwind only emits `ease-spring`/`animate-meal-in` once used; Task 6 test 9 checks the computed timing functions.)
+  - `AC-3.4` The new light `--background` (`#ffffff` → `#f4f5f7`) keeps the untouched screens legible (design-spec Plan gap 4). — **Inspect:** QA screenshots `/login`, `/log`, `/history`, `/settings` at 390×844 in light and dark (`page.emulateMedia({ colorScheme })`) after Task 4, and confirms text and bordered inputs stay legible.
+
+### Task 4: Mobile column, bottom tab bar, Sign out on Settings  `[judgment]`
+
+- **Files:** create `app/(app)/tab-bar.tsx`, `e2e/tab-bar.spec.ts`; modify `app/(app)/layout.tsx`, `app/(app)/settings/page.tsx`, `app/globals.css`, `e2e/auth.spec.ts`.
+- **Interfaces:** consumes Task 3 tokens. Produces `export function TabBar(): JSX.Element` (client) and the layout column every `(app)` page renders in.
+- **Steps:**
+  - [ ] `tab-bar.tsx` (`"use client"`): `const TABS = [["/", "Today"], ["/log", "Log"], ["/history", "History"], ["/settings", "Settings"]] as const`. `const pathname = usePathname()`. Render `<nav aria-label="Main" className="sticky bottom-0 border-t border-track bg-surface">` → `<ul className="grid grid-cols-4">` → `<li>` → `<Link href aria-current={pathname === href ? "page" : undefined} className="flex min-h-14 items-center justify-center text-sm …">`. Active: `text-foreground font-semibold`; inactive `text-muted`. Focus-visible outline `outline-2 -outline-offset-2 outline-foreground`.
+  - [ ] `layout.tsx`: keep `await requireUser()`. Replace the header with `<div className="mx-auto flex min-h-dvh w-full max-w-[430px] flex-col"><div className="flex-1">{children}</div><TabBar /></div>`. Remove the `<header>`, the old nav and the Sign out form.
+  - [ ] `settings/page.tsx`: after `<TargetsForm />`, add `<form action="/auth/signout" method="post" className="mt-8"><button type="submit" className="rounded-full border border-track px-4 py-2">Sign out</button></form>` (a sibling, not nested in the targets form).
+  - [ ] `app/globals.css`: add `html { scroll-padding-bottom: 4rem; }` (design-spec Plan gap 1).
+  - [ ] `e2e/auth.spec.ts` "sign out returns to /login": `await page.goto("/settings")` before clicking `Sign out`.
+  - [ ] `e2e/tab-bar.spec.ts`:
+    - for each of `/`, `/log`, `/history`, `/settings`: `page.getByRole("navigation", { name: "Main" }).getByRole("link")` has 4 links in order `Today, Log, History, Settings`; exactly one has `aria-current="page"`, and it's the one for that route;
+    - clicking `History` in the tab bar from `/` lands on `/history` with `History` current;
+    - at 1280×800 the nav's bounding box is ≤ 430 px wide and horizontally centred (±1 px); at 390×844 on `/settings`, the nav's bottom edge equals the viewport height;
+    - no header `Sign out` on `/`: `page.getByRole("button", { name: "Sign out" })` count 0 on `/`, 1 on `/settings`.
+- **Acceptance criteria:**
+  - `AC-4.1` Every signed-in screen shows the 4-tab bar with exactly one `aria-current="page"` on the active tab. — **Verify:** `npx playwright test e2e/tab-bar.spec.ts` → pass.
+  - `AC-4.2` The column is max 430 px and centred, and the tab bar sits at the bottom of a 100dvh column. — **Verify:** same spec (bounding-box assertions).
+  - `AC-4.3` Accessibility: the nav is a landmark named `Main` with real links; no interactive element is nested in another. — **Verify:** same spec asserts `page.locator("button button, a a, a button, button a").count() === 0` on all four routes.
+  - `AC-4.4` Sign out works from Settings, and the targets form still behaves (FC-15). — **Verify:** `npx playwright test e2e/auth.spec.ts e2e/settings.spec.ts` → pass.
+  - `AC-4.5` Copy is verbatim. — **Verify:** `grep -F '"Today"' app/\(app\)/tab-bar.tsx`, same for `"Log"`, `"History"`, `"Settings"`; `grep -F 'Sign out' app/\(app\)/settings/page.tsx` → match; `grep -F 'Sign out' app/\(app\)/layout.tsx` → none.
+  - `AC-4.6` No horizontal scroll at 320 px on `/log`, `/history`, `/settings` with the tab bar (FC-20). — **Verify:** the spec sets 320×568 and asserts `document.documentElement.scrollWidth <= 320` on each.
+  - Design-spec items (S5 app frame, S6 Sign out), each asserted in `e2e/tab-bar.spec.ts` unless noted:
+  - `D-5.1` On `/`, `/log`, `/history`, `/settings`: four links in order Today, Log, History, Settings; exactly one `aria-current="page"`, the current route's. — **Verify:** `npx playwright test e2e/tab-bar.spec.ts`.
+  - `D-5.2` The current tab has computed `font-weight` `600`, the others `400`; every tab `boundingBox().height >= 56`. — **Verify:** same spec (`toHaveCSS`).
+  - `D-5.3` Column ≤ 430 px and centred at 1280×800; nav bottom edge equals the viewport height at 390×844 and at 320×568 on `/settings` (scrolled to top). — **Verify:** same spec.
+  - `D-5.4` A keyboard user never lands on a control hidden under the bar. — **Verify:** at 320×568 on `/settings`, and on `/` (no targets, empty day; re-run after Task 5/6 land): Tab through every focusable element before the nav; for each, `activeElement.getBoundingClientRect().bottom <= nav.getBoundingClientRect().top`. `grep -n 'scroll-padding-bottom' app/globals.css` → 1 match.
+  - `D-5.5` Tab links show an inset `foreground` focus outline. — **Verify:** Tab to `Log` → computed `outline-style` `solid`, `outline-offset` `-2px`.
+  - `D-5.6` A load error on `/` still shows the tab bar. — **Inspect:** `error.tsx` is in `app/(app)/` and the layout renders `<TabBar />` outside `{children}`; plus the `pages.test.ts` Today rejection case (AC-5.11).
+  - `D-5.7` No horizontal scroll at 320×568 on all four routes and no nested interactives. — **Verify:** AC-4.3 + AC-4.6 assertions, `/` included.
+  - `D-6.1` `/settings` has exactly one `Sign out` button, in its own form after the targets form, and it signs out to `/login`; `/` has none; `page.locator("form form").count() === 0` on `/settings`. — **Verify:** same spec + `npx playwright test e2e/auth.spec.ts`.
+
+### Task 5: Today page, TodayScreen, WeekStrip and MealList  `[judgment]`
+
+- **Files:** create `app/(app)/today-screen.tsx`, `app/(app)/today-days.tsx`, `app/(app)/week-strip.tsx`, `app/(app)/meal-list.tsx`, `e2e/helpers/meals.ts`; modify `app/(app)/page.tsx`, `lib/supabase/server.ts`, `app/pages.test.ts`, `e2e/today.spec.ts` (rewrite), `e2e/log-meal.spec.ts` (line 44 and the session helper).
+- **Interfaces:** consumes Tasks 1–3. Produces:
+  - `requireUser(): Promise<{ supabase; userId: string; email: string }>` (`email: data.claims.email ?? ""`);
+  - `TodayScreen({ email, days, targets }: { email: string; days: Day[]; targets: Targets | null })` (server);
+  - `TodayDays({ days, targets })` (client): `const [selected, setSelected] = useState(days[days.length - 1].date)`; `index = days.findIndex(d => d.date === selected)`, falling back to `days.length - 1`; renders `<WeekStrip days index onSelect={setSelected} />`, a slot for Task 6 (`{/* MacroRings: Task 6 */}`), and `<MealList key={day.date} meals={day.meals} />`;
+  - `WeekStrip({ days, index, onSelect }: { days: Day[]; index: number; onSelect: (date: string) => void })`;
+  - `MealList({ meals }: { meals: DayMeal[] })`;
+  - `e2e/helpers/meals.ts`: `session(page)` (moved from `userMeals` in `log-meal.spec.ts`) and `insertMeal(page, eaten_on: string, items)` (PostgREST `POST /rest/v1/meals` with the user's JWT, body `{ id: crypto.randomUUID(), user_id: session.user.id, eaten_on, items }`, `Prefer: return=minimal`, expect 201).
+- **Steps:**
+  - [ ] `lib/supabase/server.ts`: `requireUser` returns `{ supabase, userId: data.claims.sub, email: data.claims.email ?? "" }`. No other change.
+  - [ ] `page.tsx`: `const { supabase, email } = await requireUser(); const { date, timeZone } = await getToday();` One meals query: `.from("meals").select("id, eaten_on, logged_at, items").gte("eaten_on", lastSevenDays(date)[0]).lte("eaten_on", date).order("logged_at")`, in `Promise.all` with the unchanged `daily_targets` `.maybeSingle()`. Keep `if (meals.error || targets.error) throw new Error("Failed to load today")`. `days = buildWeek(rows, date, timeZone, targets.data?.calorie_target ?? null)`. Return `<TodayScreen email={email} days={days} targets={targets.data} />`.
+  - [ ] `today-screen.tsx` (no directive): `<main className="flex flex-col gap-5 px-4 py-6">`; header row: left = `<p className="text-xs font-medium uppercase tracking-wide text-muted">NutritionTracker</p>` + `<h1 className="text-[32px] font-bold leading-tight">Today</h1>`; right = avatar `<span role="img" aria-label={`Signed in as ${email}`} className="grid size-10 place-items-center rounded-full bg-track text-sm font-semibold">{initials(email)}</span>`. Then `<TodayDays …/>`.
+  - [ ] `week-strip.tsx` (`"use client"`): `<div role="group" aria-label="Last 7 days" className="relative grid grid-cols-7 overflow-hidden rounded-full bg-track p-1">`. Highlight: `<div aria-hidden className="absolute inset-y-1 left-1 w-[calc((100%-8px)/7)] rounded-full bg-linear-to-b from-accent to-accent-strong transition-transform duration-[590ms] ease-spring motion-reduce:duration-200 motion-reduce:ease-out" style={{ transform: `translateX(${index * 100}%)` }} />`. Seven `<button type="button">`s: `aria-pressed={i === index}`, `aria-label={d.label}`, `tabIndex={i === index ? 0 : -1}`, `onClick={() => onSelect(d.date)}`, `onKeyDown`, `className="relative z-10 flex h-[62px] flex-col items-center justify-center gap-1 rounded-full outline-none focus-visible:outline-2 focus-visible:-outline-offset-2"` plus `focus-visible:outline-on-accent` when selected, `focus-visible:outline-foreground` otherwise. Content: weekday (`text-xs font-medium`, `text-muted` or `text-on-accent` when selected), date number (`text-base font-semibold tabular-nums`, foreground or `text-on-accent`), dot `size-[5px] rounded-full` (`bg-macro-protein`, `bg-on-accent` when selected; `invisible` when `!d.goalMet`, so heights don't jump). Text colour transitions are fine; no other animation.
+  - [ ] Keyboard: ArrowLeft → `max(0, index - 1)`, ArrowRight → `min(6, index + 1)`, Home → 0, End → 6; `preventDefault()`; `onSelect(days[next].date)`; focus `buttonRefs.current[next]` inside the handler (refs are read only in handlers, never in render — `react-hooks/refs`).
+  - [ ] `meal-list.tsx` (`"use client"`): `<section aria-labelledby="meals-h"><h2 id="meals-h" className="text-lg font-semibold">Meals</h2>`. Empty: `<p>No meals logged on this day.</p>` + `<Link href="/log" className="inline-flex rounded-full bg-accent px-4 py-2 font-medium text-on-accent">Snap meal</Link>`. Else `<ul className="flex flex-col gap-3">`, each `<li className="flex animate-meal-in items-start gap-3 rounded-2xl bg-surface p-3 motion-reduce:animate-none" style={{ animationDelay: `${i * 60}ms` }}>`: tile `<span aria-hidden className="grid size-[46px] shrink-0 place-items-center rounded-xl bg-track font-semibold">{m.initial}</span>`; body `<div className="min-w-0 flex-1 [overflow-wrap:anywhere]"><p className="font-medium">{m.names}</p><p className="text-sm text-muted tabular-nums">{m.itemCount === 1 ? "1 item" : `${m.itemCount} items`} · {m.kcal} kcal</p></div>`; time `<span className="shrink-0 text-sm text-muted tabular-nums">{m.time}</span>`.
+  - [ ] `app/pages.test.ts`: add `email: "dean@example.test"` to the `requireUser` mock. New `describe("Today")`: (a) `state.result = { data: [], error: null }`; `await TodayPage()`; `state.calls` contains `["gte", "eaten_on", "2026-10-14"]` and `["lte", "eaten_on", "2026-10-20"]`; (b) `state.result = { data: null, error: { code: "42501" } }` → `TodayPage()` rejects.
+  - [ ] `e2e/helpers/meals.ts` + `log-meal.spec.ts`: move the cookie → session parsing out of `userMeals` into `session(page)`; `userMeals` uses it. Line 44: replace `getByText("380 kcal", { exact: true })` with `getByText("2 items · 380 kcal")`.
+  - [ ] Rewrite `e2e/today.spec.ts` (keep the `item`, `logMeal` helpers; add `setTargets(page, ["2000","150","200","70"])` from the existing loop). Compute dates in-test: `today = localDate("Asia/Manila")` (import from `../lib/dates`), `label(d)` with the same `Intl` options as `buildWeek`. Tests:
+    1. **Empty state (new user):** heading `Today`; text `NutritionTracker`; avatar `getByRole("img", { name: `Signed in as ${email}` })` has text `initials(email)`; group `Last 7 days` has 7 buttons; the last has name `label(today)`, `aria-pressed="true"`, `tabindex="0"`; the other 6 have `aria-pressed="false"`, `tabindex="-1"`; `No meals logged on this day.` visible; link `Snap meal` → `/log`.
+    2. **Day switching without refetch:** `setTargets`; `insertMeal(page, addDays(today, -2), [item("Oats", 1900, 4, 30, 2)])`; `logMeal(page, [item("Rice", 72.4, 6.3, 0.4, 4.8)])`. On `/`, today shows the `Rice` row with `1 item · 72 kcal` and a time matching `/^\d{1,2}:\d{2}\s[AP]M$/`. The button named `` `${label(addDays(today, -2))}, goal met` `` exists. Start recording requests (`page.on("request")`) **before** the click; click it → it's `aria-pressed="true"`, today's is `"false"`; `Oats` and `1 item · 1900 kcal` are visible and `Rice` is gone; the highlight's inline `transform` is `translateX(400%)`. Then click the button for `addDays(today, -1)` → `No meals logged on this day.` and `Snap meal` show. Finally assert the recorded requests contain none whose URL pathname is `/` (document or `rsc` header).
+    3. **Keyboard / roving tabindex:** focus today's button; `ArrowLeft` → the button for `today - 1` is focused and pressed; `Home` → index 0 focused and pressed; `ArrowLeft` again → still index 0; `End` → index 6; `ArrowRight` → still index 6. After each step exactly one day button has `tabindex="0"` and it is the focused one. `Tab` moves focus out of the group (no day button focused).
+    4. **No horizontal scroll at 320×568**, with `logMeal` of `"x".repeat(80)` (the row text wraps and is visible) and after switching days.
+    5. **No console errors / hydration warnings:** collect `console` `error` and `pageerror` events across load + two day switches → none.
+- **Acceptance criteria:**
+  - `AC-5.1` Empty state: a day with no meals shows `No meals logged on this day.` and a `Snap meal` link to `/log` (FC-21). — **Verify:** `npx playwright test e2e/today.spec.ts -g "Empty state"` → pass.
+  - `AC-5.2` Today is selected by default; each day is a real `button` with `aria-pressed` and a full-date `aria-label`. — **Verify:** same test.
+  - `AC-5.3` Switching days updates the list on the client, with no request to `/`, and the dot/aria-label marks the 90–110 % day. — **Verify:** `-g "Day switching"` → pass. Mutation (FC-26): on a scratch copy, make `onSelect` call `router.push("/?d=…")` → the no-refetch assertion fails.
+  - `AC-5.4` Arrow keys, Home and End move selection and focus with a single tab stop. — **Verify:** `-g "Keyboard"` → pass. Mutation: remove `onKeyDown` → fails.
+  - `AC-5.5` Meal rows show the tile letter, names joined by `, `, `<n> items · <kcal> kcal` and the local time; exactly one item reads `1 item · <kcal> kcal` (singular; never `1 items`) (OQ2, decided). — **Verify:** test 2 asserts `1 item · 72 kcal` and `1 item · 1900 kcal`; `page.getByText("1 items")` count 0; Task 2's unit fixture (`itemCount` 2 → `2 items`).
+  - `AC-5.6` No nested interactive elements; the highlight is `aria-hidden`; focus outlines are inset so `overflow-hidden` doesn't clip them (FC-18). — **Verify:** test 2 asserts `page.locator("button button, a a, a button, button a").count() === 0`. **Inspect:** `week-strip.tsx` has `aria-hidden` on the highlight and `-outline-offset-2` on the buttons.
+  - `AC-5.7` Components use tokens only (FC-19). — **Verify:** `grep -nE '#[0-9a-fA-F]{3,8}\b|(bg|text|border|from|to|stroke|outline)-(black|white|gray|slate|zinc|neutral|blue|sky)\b' app/\(app\)/{today-screen,today-days,week-strip,meal-list,tab-bar}.tsx` → no output.
+  - `AC-5.8` Shared callers still work (FC-15). — **Verify:** `npm test` (pages tests incl. the new Today range/throw cases) and `npx playwright test e2e/log-meal.spec.ts e2e/history.spec.ts e2e/auth.spec.ts` → pass.
+  - `AC-5.9` A refresh keeps the selected calendar day. — **Inspect:** `today-days.tsx` stores a date string and falls back to the last index when it isn't in `days`.
+  - `AC-5.10` No hydration warnings, and lint passes without suppressions (FC-16). — **Verify:** test 5 passes; `npm run lint && npm run typecheck` → exit 0; `grep -rn "eslint-disable" app/\(app\)` → none.
+  - `AC-5.11` Load failure goes to `error.tsx`, not an empty week. — **Verify:** the new `pages.test.ts` Today case rejects.
+  - `AC-5.12` No zod in the client bundle. — **Verify:** `grep -n "@/lib/nutrition" app/\(app\)/{today-days,week-strip,meal-list,tab-bar}.tsx` → none (types come from `@/lib/today`).
+  - `AC-5.13` 320 px, no horizontal scroll on `/` (FC-20). — **Verify:** test 4 passes.
+  - Design-spec items (S1 header, S2 week strip, S4 meals list), each added to `e2e/today.spec.ts` (the colour checks run in the default light scheme):
+  - `D-1.1` `NutritionTracker` above the only `h1` `Today`, computed `font-size` `32px`, `font-weight` `700`. — **Verify:** test 1: `toHaveCSS` on `h1`; `page.locator("h1")` count 1.
+  - `AC-5.14` The title stays `Today` whichever day is selected, and no date line is added (OQ3, decided). — **Verify:** test 2: after selecting `today-2`, `page.locator("h1")` has text exactly `Today`, and `page.locator("main").getByText(/^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), /)` count 0 (full dates exist only as button aria-labels).
+  - `D-1.2` Avatar `role="img"` named `Signed in as <email>`, text `initials(email)`, no `tabindex`. — **Verify:** test 1.
+  - `D-2.1` Seven buttons in group `Last 7 days`, oldest → newest; last is today, `aria-pressed="true"`, `tabindex="0"`, full-date name; others `"false"`/`"-1"`. — **Verify:** test 1.
+  - `D-2.2` Exactly one `aria-hidden` highlight; inline `translateX(<index*100>%)`; transition `0.59s` with a `linear(` timing function; `0.2s` under reduced motion. — **Verify:** tests 2 and 9.
+  - `D-2.3` Selected day's number renders `rgb(255, 255, 255)`; an unselected day's weekday renders `rgb(92, 99, 112)`. — **Verify:** test 2, after selecting `today-2`.
+  - `D-2.4` All seven day buttons are 62 px tall whether or not a dot shows; the goal-met button's name ends `, goal met`. — **Verify:** test 2 (`boundingBox().height === 62`).
+  - `D-2.5` Arrows clamp, Home/End jump, always one `tabindex="0"`, Tab leaves the group. — **Verify:** test 3.
+  - `D-2.6` Keyboard focus on the selected day shows an inset outline not clipped by `overflow-hidden`. — **Verify:** Tab onto the selected day → computed `outline-style` `solid`, `outline-offset` `-2px`; QA screenshot of the strip at 320×568 with focus on index 6 shows all four sides.
+  - `D-2.7` Switching again mid-animation ends on the last choice. — **Verify:** click `today-2` then `today-1` within 100 ms; after 1.2 s `today-1` is pressed, the highlight is `translateX(500%)`, the list shows `today-1`'s state (and, after Task 6, the Protein legend shows `today-1`'s value).
+  - `D-2.8` At 320×568 each day button `boundingBox().width >= 40`, no horizontal scroll. — **Verify:** test 4.
+  - `D-4.1` Rows: 46×46 tile with the first item's initial, names joined by `, `, `<n> items · <kcal> kcal` (`1 item`), time matching `^\d{1,2}:\d{2}\s[AP]M$`. — **Verify:** test 2 + tile `boundingBox()` 46×46; Task 2 unit fixture.
+  - `D-4.2` Rows in `logged_at` order, earliest first. — **Verify:** log `Rice` then `Toast` today → the first `li` contains `Rice`.
+  - `D-4.3` Empty day: `No meals logged on this day.` and `Snap meal` → `/log`. — **Verify:** test 1 and the second half of test 2.
+  - `D-4.4` Rows enter with `meal-in` at a 60 ms stagger and replay on day change; reduced motion gives `animation-name: none`. — **Verify:** with two meals, the second row's computed `animationDelay === "0.06s"`; test 9 for reduced motion.
+  - `D-4.5` An 80-char single-word name wraps; the time stays inside the row's right edge; no horizontal scroll at 320×568. — **Verify:** test 4 + `time.x + time.width <= row.x + row.width`.
+
+### Task 6: MacroRings with legend and count-up  `[judgment]`
+
+- **Files:** create `app/(app)/macro-rings.tsx`; modify `app/(app)/today-days.tsx` (replace the Task 6 slot), `e2e/today.spec.ts` (add tests).
+- **Interfaces:** consumes `ringOffset` and types from Task 1, tokens from Task 3. Produces `MacroRings({ totals, targets }: { totals: Totals; targets: Targets | null })`, rendered by `TodayDays` with `totals={day.totals}`.
+- **Steps:**
+  - [ ] `RINGS = [["Protein", "protein_g", "protein_target_g", 72, "stroke-macro-protein", "bg-macro-protein"], ["Carbs", "carbs_g", "carbs_target_g", 53, "stroke-macro-carbs", "bg-macro-carbs"], ["Fat", "fat_g", "fat_target_g", 34, "stroke-macro-fat", "bg-macro-fat"]] as const`. Values shown are `Math.round(totals[key])`; `kcal = Math.round(totals.calories)`.
+  - [ ] Card: `<section className="flex flex-wrap items-center justify-center gap-4 rounded-3xl bg-surface p-5">`.
+  - [ ] Rings: `<div role="img" aria-label={summary} className="relative size-40 shrink-0">` → `<svg width="160" height="160" viewBox="0 0 160 160" aria-hidden="true" className="-rotate-90">`. Per ring: track `<circle cx="80" cy="80" r={r} fill="none" strokeWidth="15" className={`${stroke} opacity-20`} />`; when `targets` is set, progress `<circle data-ring="progress" cx="80" cy="80" r={r} fill="none" strokeWidth="15" strokeLinecap="round" pathLength={1} strokeDasharray="1" style={{ strokeDashoffset: off }} className={`${stroke} transition-[stroke-dashoffset] duration-[1100ms] ease-fluid motion-reduce:duration-200 ${off === 1 ? "opacity-0" : ""}`} />` with `off = ringOffset(eaten, target)`. Centre overlay (HTML, not rotated): `<div className="absolute inset-0 grid place-content-center text-center"><span className="text-lg font-bold leading-none tabular-nums">{kcal}</span><span className="text-xs leading-none text-muted">kcal</span>` (design-spec D-3.3: `text-2xl` overflows the 53 px hole at 4 digits)`</div>`.
+  - [ ] `summary`: with targets `` `${kcal} kcal. Protein ${p} of ${pt} g, Carbs ${c} of ${ct} g, Fat ${f} of ${ft} g` ``; without `` `${kcal} kcal. Protein ${p} g, Carbs ${c} g, Fat ${f} g. No targets set` ``. Final values, never the animated ones.
+  - [ ] Legend `<div className="flex min-w-0 flex-1 basis-[120px] flex-col gap-2">`: per macro a row with swatch `<span aria-hidden className={`size-2 rounded-full ${bg}`} />`, label (`text-sm font-medium`), then `<span className="text-[26px] font-semibold leading-none tabular-nums">{useCountUp(value)}</span>` followed by `<span className="text-sm text-muted">/ {target} g</span>` (with targets) or `<span className="text-sm text-muted">g</span>` (without). The number and target are in a `flex flex-wrap items-baseline gap-1` row. Below the three rows: with targets `<p className="text-sm text-muted tabular-nums">{Math.abs(left)} kcal {left >= 0 ? "left" : "over"}</p>` where `left = targets.calorie_target - kcal`; without targets `<Link href="/settings" className="text-sm font-medium underline">Set your daily targets</Link>`.
+  - [ ] `useCountUp(value: number, ms = 900): number` (module-local, one hook call per legend row via a small `Legend` row component at module scope — not defined inside another component): `const [shown, setShown] = useState(value); const from = useRef(value);` `useEffect(() => { const start = from.current; if (start === value) return; const dur = matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : ms; let raf = 0, t0 = -1; const tick = (t: number) => { if (t0 < 0) t0 = t; const p = dur ? Math.min(1, (t - t0) / dur) : 1; const v = start + (value - start) * (1 - (1 - p) ** 3); from.current = v; setShown(v); if (p < 1) raf = requestAnimationFrame(tick); }; raf = requestAnimationFrame(tick); return () => cancelAnimationFrame(raf); }, [value, ms]);` Return `Math.round(shown)`. State is only set inside the rAF callback (satisfies `react-hooks/set-state-in-effect`).
+  - [ ] Add to `e2e/today.spec.ts`:
+    6. **Rings and legend from saved meals** (ports the old totals test): `setTargets`; log Rice (72.4/6.3/0.4/4.8) and Toast (195/4/42/0.4). Assert `getByRole("img", { name: "267 kcal. Protein 10 of 150 g, Carbs 42 of 200 g, Fat 5 of 70 g" })`; texts `1733 kcal left`, `/ 150 g`, `/ 200 g`, `/ 70 g`; three `[data-ring="progress"]` circles; `parseFloat(getComputedStyle(protein).strokeDashoffset)` ≈ `1 - 10.3/150` (±0.01).
+    7. **Rounding agrees** (ports the old test): targets 2000; one item 200.5 kcal → img name starts `201 kcal.`; `1799 kcal left`. Over case: seed a 2100-kcal meal today via `insertMeal` with target 2000 → `100 kcal over`.
+    8. **No targets:** new user with one logged meal → img name `… No targets set`; `[data-ring="progress"]` count 0; link `Set your daily targets` → `/settings`; no `kcal left`/`kcal over` text.
+    9. **Count-up and reduced motion:** targets set; `insertMeal` at `today - 1` with protein 120; today empty. In one `page.evaluate`, click the `today - 1` button and sample the Protein legend number every animation frame for 400 ms. Default motion: at least one sample is strictly between 0 and 120, and after 1 s the text is `120`. With `page.emulateMedia({ reducedMotion: "reduce" })` (fresh page): no sample is strictly between 0 and 120; also `getComputedStyle(progressCircle).transitionDuration === "0.2s"`, and each meal row's `animationName === "none"`. Without reduced motion, the progress circle's `transitionDuration === "1.1s"` and `transitionTimingFunction === "cubic-bezier(0.32, 0.72, 0, 1)"`, and the highlight's `transitionDuration === "0.59s"` with a `linear(` timing function.
+    10. **320×568 with large values:** targets `10000/1000/1000/1000` and a meal with an 80-char name → `scrollWidth <= 320`; the legend's bounding box starts below the rings' (wrapped).
+- **Acceptance criteria:**
+  - `AC-6.1` Rings and legend show the selected day's totals against targets, with `kcal left`/`kcal over` agreeing with the rounded centre number (FC-17). — **Verify:** `npx playwright test e2e/today.spec.ts -g "Rings|Rounding"` → pass.
+  - `AC-6.2` No targets: tracks only, and the legend links to `Set your daily targets` (FC-21 empty/“not configured” state). — **Verify:** `-g "No targets"` → pass.
+  - `AC-6.3` Ring geometry matches the request. — **Inspect:** `macro-rings.tsx`: `width="160"`, radii `72`, `53`, `34` in that order for Protein/Carbs/Fat, `strokeWidth="15"`, `strokeLinecap="round"`, `pathLength={1}`, `strokeDasharray="1"`, `-rotate-90`, offset from `ringOffset`, and an empty ring is `opacity-0`.
+  - `AC-6.4` Accessibility: the rings are `role="img"` with the exact summary; the SVG is `aria-hidden`; no interactive nesting. — **Verify:** test 6/8 names match exactly; the nested-interactive count is 0 on `/`.
+  - `AC-6.5` 320 px: no horizontal scroll, legend wraps below (FC-20). — **Verify:** test 10 passes.
+  - `AC-6.6` Tokens only (FC-19). — **Verify:** the AC-5.7 grep extended to `macro-rings.tsx` → no output.
+  - `AC-6.7` Count-up animates over ~900 ms with rAF, and reduced motion removes the count-up and stagger and shortens the ring to 200 ms; lint passes without suppressions (FC-16). — **Verify:** test 9 passes; `npm run lint` → exit 0.
+  - Design-spec items (S3 rings card), each added to `e2e/today.spec.ts` unless noted:
+  - `D-3.1` Geometry: 160 px, radii 72/53/34 for Protein/Carbs/Fat in that order, stroke 15, round caps, `pathLength=1`, dasharray 1, offset from `ringOffset`, rotated −90°. — **Inspect:** as AC-6.3; `grep -nE '\b(72|53|34)\b' app/\(app\)/macro-rings.tsx` shows them in that order in `RINGS`.
+  - `D-3.2` Each ring, its track and its swatch use the same macro token. — **Verify:** `grep -nE 'macro-(protein|carbs|fat)' app/\(app\)/macro-rings.tsx` shows a `stroke-` and a `bg-` per macro; AC-6.6 grep → no output.
+  - `D-3.3` A 4-digit centre total stays inside the inner hole. — **Verify:** seed 2345 kcal today → centre number `boundingBox().width <= 48`, number + unit block `height <= 34`, its centre within ±1 px of the rings box centre.
+  - `D-3.4` Legend: label, 26 px number, `/ <target> g`; kcal line agrees with the rounded centre. — **Verify:** tests 6 and 7; `toHaveCSS("font-size", "26px")` on a legend number.
+  - `D-3.5` No targets: zero progress circles, numbers + `g`, `Set your daily targets` → `/settings`, no `kcal left`/`over`. — **Verify:** test 8.
+  - `D-3.6` Targets set, empty day: every `[data-ring="progress"]` has computed `opacity` `0`, and `2000 kcal left` shows (targets 2000/150/200/70). — **Verify:** new assertion selecting an empty day.
+  - `D-3.7` Rings wrapper `role="img"` with the exact summary; an `svg[aria-hidden="true"]` inside it. — **Verify:** tests 6 and 8.
+  - `D-3.8` Count-up 900 ms ease-out on day change only; fill 1.1 s `cubic-bezier(0.32, 0.72, 0, 1)`; reduced motion: no count-up, 0.2 s fill. — **Verify:** test 9.
+  - `D-3.9` Legend below the rings at 320×568; beside them at 390×844 (legend `y < rings.y + rings.height` and `x >= rings.x + rings.width`). — **Verify:** test 10 + the 390×844 assertion.
+  - `AC-6.8` Whole feature green (FC-15, FC-22). — **Verify:** the full gate (Verification commands) → every step exits 0; `find .orchestrate -name '*.test.ts' -o -name '*.spec.ts'` → no output (lesson: probe files).
 
 ---
-
-## Human-only steps (not done by Engineer or QA)
-
-- **H1** Create the Supabase project. Copy the Project URL and the **publishable** key (Settings → API Keys).
-- **H2 (migration — before merge/deploy, FC-01):** `npx supabase login && npx supabase link --project-ref <ref> && npx supabase db push`. This applies `20261020000000_nutrition_mvp.sql` to production.
-- **H3** Supabase dashboard → Authentication:
-  - Site URL = the Vercel production URL;
-  - edit **both** the "Magic Link" and "Confirm signup" templates so the link is `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email`;
-  - configure custom SMTP (the built-in mailer is rate-limited);
-  - after creating your own account, consider turning off "Allow new users to sign up" until scan limits exist (cost control).
-- **H4** In the Groq console (free tier):
-  - create `GROQ_API_KEY`;
-  - in Settings → Data Controls, turn on **Zero Data Retention**, since meal photos would otherwise be loggable for up to 30 days;
-  - in Settings → Limits, read the real free-tier RPM/RPD/TPM/TPD for `qwen/qwen3.8-27b` and record them in `README.md`. The plan's 30/1K/8K/200K figures come from the docs' Developer-plan base table;
-  - watch Groq's deprecations page, because the model is in preview.
-- **H5** Create a GitHub remote (none exists) and push. Import it in Vercel. Set the env vars `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` and `GROQ_API_KEY` (server-only). **Do not add a service-role or secret key.** Check that the preview build succeeds (FC-02). Magic links always point to the Site URL, so sign-in on preview deployments isn't supported in the MVP.
-- **H6** Allow these if your permission settings prompt for them:
-  - `npx supabase start`/`db reset`/`test db` (Docker);
-  - `npx playwright install chromium` (downloads to `~/Library/Caches/ms-playwright`).
-- **H7** Real-photo smoke test, after Task 7. Add `GROQ_API_KEY` to `.env.local`, run `npm run dev`, sign in at `http://127.0.0.1:3000`, and snap one real meal. This confirms JSON mode works with a real image, and that no reasoning text (`<think>`) leaks into `content`. If it fails, or reasoning shows up, send the response to the Engineer. The fix is a request-parameter change in `lib/analyze.ts`, using Groq's reasoning parameters for this model.
-- **H8 (gate):** do not turn Supabase sign-ups back on (H3) until the per-user daily analysis cap (see Deferred) has shipped.
-
-## Not verifiable locally (FC-24 — list as "not verified" in hand-off)
-
-- Real phone camera capture through `capture="environment"`.
-- HEIC photos on non-Safari browsers (`createImageBitmap` may fail; this shows the error state).
-- The quality of Groq's estimates on real photos, and JSON mode with a real image (H7).
-- The real free-tier quota for `qwen/qwen3.8-27b` (H4).
-- There is no per-user daily cap yet. Sign-ups must stay off until it ships (H8).
-- Production email delivery.
-- The Vercel deploy and its function duration.
-
-## Deferred (out of MVP scope)
-
-- Saved-foods pantry.
-- Barcode or nutrition-label scanning.
-- Trend charts.
-- Body weight logging.
-- Reminders or daily summaries.
-- Stripe and paid scan limits.
-- **Per-user daily analysis cap (decided: deferred). Gate: it must ship before Supabase sign-ups are opened (H8).** Planned shape: an `analysis_usage (user_id, day, count)` table with RLS, plus a migration and a prod apply; a check-and-increment in `/api/analyze` before calling Groq, returning 429 `You've reached today's photo limit. Enter the meal manually.`; a pgTAP test and a route test.
-- Storing meal photos (decided: not stored).
-- Editing or deleting a saved meal (decided: deferred).
-- `meal_type` (breakfast/lunch/…) and stored `confidence`.
-- Google OAuth.
-- Sign-in on preview deployments.
-- A CI workflow (there is no remote yet).
-
----
-
-## Decided (revision 1)
-
-- **Provider:** Groq, `groq-sdk@1.6.0`, model `qwen/qwen3.8-27b` (preview), using JSON mode plus server-side Zod validation (G13).
-- **Photos:** not stored (G4).
-- **Edit or delete after saving:** deferred.
-- **Per-user daily analysis cap:** deferred, but it must ship before Supabase sign-ups are opened (see Deferred and H8).
-- **Preview model `qwen/qwen3.8-27b`:** accepted for production. Swapping models is a change to one constant, and an outage degrades to `Enter manually`.
 
 ## Open questions for the human
 
-none: both were answered by the human at plan approval (see Decided).
+All three **decided: human, 2026-10-20** — the recommended answers were approved.
+
+1. **0 g target with food eaten → empty ring** (a 0 g target is full only when eaten is 0). Covered by AC-1.2.
+2. **Single item → `1 item · <kcal> kcal`** (singular). Covered by AC-5.5.
+3. **Title stays `Today`; no date line** when another day is selected. The pill and the button labels carry the date. Covered by AC-5.14.
+
+## Deferred
+
+- Align `/log` and `/settings` buttons (`bg-black … dark:bg-white`, Tailwind `gray`/`amber` classes in `app/(app)/settings/targets-form.tsx:43`, `app/(app)/log/meal-logger.tsx:180,214,215,277`) with the new token vocabulary (design-spec Plan gap 3).
+
+## Human-only steps
+
+- none for deploy: no migration, no env var, no dependency. After merge, Vercel redeploys from `main` as before.
 
 ## Review
 
-**Outcome:** done with open items, on branch `feat/nutrition-mvp` (base `3a8063c`). All 10 tasks passed QA, and the whole-branch QA passed on round 2.
+**Outcome:** done with open items (device-only checks; `supabase db reset` not run). Branch `feat/today-macro-rings`, base `af343f8` (plan commit; `main` at `73bcf87`).
 
-| Task | Model | QA verdict | Fix rounds |
+| Task | Model | QA | Fix rounds |
 |---|---|---|---|
-| 1 Scaffold | haiku | PASS r1 | 0 |
-| 2 Supabase, migration, RLS | haiku | PASS r1 | 0 |
-| 3 Domain library | sonnet | PASS r3 | 2 (NUL/length/coerce; JSON-schema bounds) |
-| 4 Auth | sonnet | PASS r2 | 1 (Host-header open redirect, 500) |
-| 5 /api/analyze (Groq) | sonnet | PASS r2 | 1 (missing key and non-completion 500s, streaming cap) |
-| 6 Settings | sonnet | PASS r2 | 1 (typed values lost on failed submit) |
-| 7 Log meal | sonnet | PASS r2 | 1 (no timeout or Cancel) |
-| 8 Today | sonnet | PASS r2 | 1 (ambiguous alert locator, error copy, rounding) |
-| 9 History | sonnet | PASS r1 | 0 |
-| 10 Docs and gate | haiku | PASS r1 | 0 |
-| 11 Typography, IBM Plex Sans (short path, after the run) | haiku | PASS r1 | 0 |
-| Whole branch | opus QA, then sonnet fix and sonnet re-QA | PASS r2 | 1 (verbatim copy, session-expired save, settings load error, History upper bound) |
+| 1 Pure helpers | haiku | PASS r1 | 0 |
+| 2 `buildWeek` | haiku | PASS r1 | 0 |
+| 3 Theme/motion tokens, 700 weight | haiku | PASS r1 (AC-3.4 verified in Task 4 QA) | 0 |
+| 4 Mobile column, tab bar, Sign out on Settings | sonnet | PASS r1 | 0 |
+| 5 Today page, WeekStrip, MealList | sonnet | PASS r1 | 0 |
+| 6 MacroRings, legend, count-up | sonnet | BLOCKED r1 (RED run denied) → accepted by human, RED proof carried to final | 0 |
+| Final whole-branch | sonnet | FAIL r1 (I1 substring assertion) → PASS r2 | 1 (test-only, `a4ae2fc`) |
 
-**Final gate** (real exit codes, all 0):
-- `npx supabase db reset`
-- `npm run db:test` (17/17)
-- `npm run lint`
-- `npm run typecheck`
-- `npm test` (74/74)
-- `npm run build`
-- `npx playwright test` (29/29, run twice)
+**Files touched:** 23 files, +1027 / −134 (`git diff --stat af343f8..HEAD`). New: `app/(app)/{macro-rings,meal-list,tab-bar,today-days,today-screen,week-strip}.tsx`, `lib/today.ts`, `e2e/tab-bar.spec.ts`, `e2e/helpers/meals.ts`. Modified: `app/(app)/{layout,page,settings/page}.tsx`, `app/globals.css`, `app/layout.tsx`, `lib/nutrition.ts`, `lib/supabase/server.ts`, tests.
 
-**Open Minor findings, ranked:**
-1. A 23505 on save is treated as success, so an edited retry after a lost response silently keeps the first version (`app/(app)/log/actions.ts`).
-2. History has no row limit, so PostgREST `max_rows=1000` truncates the oldest days without a notice.
-3. There's no `engines` field, although the README says Node 22.12+.
-4. `perplexity.txt` is stale: it mentions Anthropic and the service-role key.
-5. A signed-out GET with a `next-action` header gets Next's 307 plus a static shell. Nothing leaks; it could be tightened to POST only (`proxy.ts`).
-6. There's no regression e2e for the History 30-day edge or the future bound. They are covered by unit tests and runtime probes.
+**Commands (final QA r2, at `a4ae2fc`):** `npm run lint` exit 0 · `npm run typecheck` exit 0 · `npm test` 91 passed · `npm run build` exit 0 · `npm run e2e` 44 passed. Mutation proofs (FC-26) run in a scratch copy: 9/10 ring mutations RED at r1, the 3 survivors killed at r2.
 
-**Not verified:**
-- H7: a real Groq call with a real photo.
-- Real-device camera and HEIC capture.
-- Screen-reader announcements on a device.
-- The final pass's AC-5.8 RED re-run, which the guard hook blocked. The Task 5 QA rounds verified it.
+**Not run / not verified:** `npx supabase db reset` (permission denied; low impact, e2e seeds its own data). Device-only (FC-24): iOS Safari 100dvh, spring feel, Safari `pathLength` and round caps, dark mode on device, VoiceOver.

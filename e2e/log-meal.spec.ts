@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { signIn } from "./helpers/auth";
+import { session } from "./helpers/meals";
 
 const PHOTO = "e2e/fixtures/meal.jpg";
 const item = (name: string, calories: number) => ({ name, grams: 100, calories, protein_g: 10, carbs_g: 20, fat_g: 5 });
@@ -16,13 +17,11 @@ async function pick(page: Page) {
 
 // Reads the signed-in user's meals over PostgREST (RLS scopes them) using the session cookie.
 async function userMeals(page: Page): Promise<{ id: string; items: { calories: number }[] }[]> {
-  const cookies = (await page.context().cookies()).filter((c) => /^sb-.*-auth-token(\.\d+)?$/.test(c.name));
-  const raw = cookies.sort((a, b) => a.name.localeCompare(b.name)).map((c) => decodeURIComponent(c.value)).join("");
-  const session = JSON.parse(Buffer.from(raw.replace(/^base64-/, ""), "base64url").toString());
+  const { access_token } = await session(page);
   const res = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/meals?select=id,items`, {
     headers: {
       apikey: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
-      authorization: `Bearer ${session.access_token}`,
+      authorization: `Bearer ${access_token}`,
     },
   });
   return res.json();
@@ -41,7 +40,7 @@ test("happy path: snap, edit, live total, save", async ({ page }) => {
   await expect(page.getByText("Total: 380 kcal")).toBeVisible();
   await page.getByRole("button", { name: "Log meal" }).click();
   await page.waitForURL("/");
-  await expect(page.getByText("380 kcal", { exact: true })).toBeVisible();
+  await expect(page.getByText("2 items · 380 kcal")).toBeVisible();
   const meals = await userMeals(page);
   expect(meals).toHaveLength(1);
   expect(meals[0].items.map((i) => i.calories)).toEqual([300, 80]);

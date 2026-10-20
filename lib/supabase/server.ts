@@ -29,7 +29,7 @@ export async function requireUser() {
   const supabase = await createClient();
   const { data } = await supabase.auth.getClaims();
   if (!data?.claims) redirect("/login");
-  return { supabase, userId: data.claims.sub };
+  return { supabase, userId: data.claims.sub, email: data.claims.email ?? "" };
 }
 
 export async function getToday() {

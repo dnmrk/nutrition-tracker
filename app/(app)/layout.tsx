@@ -1,21 +1,12 @@
-import Link from "next/link";
 import { requireUser } from "@/lib/supabase/server";
+import { TabBar } from "./tab-bar";
 
 export default async function AppLayout({ children }: LayoutProps<"/">) {
   await requireUser();
   return (
-    <>
-      <header className="border-b p-4">
-        <nav aria-label="Main" className="flex items-center gap-4">
-          <Link href="/">Today</Link>
-          <Link href="/history">History</Link>
-          <Link href="/settings">Settings</Link>
-          <form action="/auth/signout" method="post" className="ml-auto">
-            <button type="submit">Sign out</button>
-          </form>
-        </nav>
-      </header>
-      {children}
-    </>
+    <div className="mx-auto flex min-h-dvh w-full max-w-[430px] flex-col">
+      <div className="flex-1">{children}</div>
+      <TabBar />
+    </div>
   );
 }
