@@ -41,6 +41,7 @@ test("happy path: snap, edit, live total, save", async ({ page }) => {
   await expect(page.getByText("Total: 380 kcal")).toBeVisible();
   await page.getByRole("button", { name: "Log meal" }).click();
   await page.waitForURL("/");
+  await expect(page.getByText("380 kcal", { exact: true })).toBeVisible();
   const meals = await userMeals(page);
   expect(meals).toHaveLength(1);
   expect(meals[0].items.map((i) => i.calories)).toEqual([300, 80]);
