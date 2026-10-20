@@ -2,14 +2,25 @@
 
 Photo-based meal and macro tracker. Next.js 16 (App Router), Supabase (auth and Postgres), Groq for meal photo analysis.
 
-## Screens
+| Today | Today (dark) | History | Settings |
+|---|---|---|---|
+| <img src="docs/screenshots/today-light.png" width="200" alt="Today screen: week strip, macro rings and meals"> | <img src="docs/screenshots/today-dark.png" width="200" alt="Today screen in dark mode"> | <img src="docs/screenshots/history.png" width="200" alt="History grouped by day"> | <img src="docs/screenshots/settings.png" width="200" alt="Daily targets form"> |
 
-A mobile column (100dvh, max 430px) with a bottom tab bar on every signed-in screen:
+## Features
 
-- **Today** (`/`): a week strip for the last 7 days, where a dot marks days within 90–110% of the calorie target. Three macro rings (Protein, Carbs, Fat) with total kcal in the centre and a count-up legend. The selected day's meals. Switching days happens on the client with no refetch.
-- **Log** (`/log`): snap a meal photo, edit the AI estimate, save.
-- **History** (`/history`): past days.
-- **Settings** (`/settings`): daily targets and Sign out.
+- **Snap a meal.** Take or pick a photo, and a Groq vision model estimates each item's grams, calories, protein, carbs and fat. Edit any estimate before saving. If analysis fails or you hit Cancel, use **Enter manually**. Photos are never stored.
+- **Today at a glance.** Three concentric rings track Protein, Carbs and Fat against your targets, with total kcal in the centre and "kcal left" or "kcal over" beneath.
+- **Last 7 days.** A week strip switches between days instantly. A dot marks days that landed within 90–110% of your calorie target.
+- **Meals list.** Each meal shows its items, item count, kcal and logged time.
+- **History.** Past days with daily totals and every meal.
+- **Daily targets.** Set calories, protein, carbs and fat in Settings.
+- **Passwordless sign-in.** A Supabase magic link. Row-level security keeps each user's data private.
+- **Time-zone aware.** "Today" follows your device's time zone, not the server's.
+- **Mobile-first and accessible.** A 100dvh column (max 430px) with a bottom tab bar, light and dark themes, keyboard navigation in the week strip (arrows, Home and End), screen-reader labels, and `prefers-reduced-motion` support.
+
+## Tech stack
+
+Next.js 16 (App Router, Server Components and Server Actions), React 19, TypeScript, Tailwind CSS v4, Supabase (`@supabase/ssr`, Postgres with RLS), Groq, zod, Vitest, Playwright and pgTAP.
 
 ## Local development
 
