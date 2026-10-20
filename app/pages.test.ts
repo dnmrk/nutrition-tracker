@@ -20,18 +20,34 @@ const query = (): unknown =>
 
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({ auth: { getClaims: async () => ({ data: state.claims ? { claims: state.claims } : null }) }, from: () => query() }),
-  requireUser: async () => ({ supabase: { from: () => query() }, userId: "u1" }),
+  requireUser: async () => ({ supabase: { from: () => query() }, userId: "u1", email: "dean@example.test" }),
   getToday: async () => ({ date: "2026-10-20", timeZone: "UTC" }),
 }));
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("next/navigation", () => ({ redirect: () => { throw new Error("redirect"); } }));
 
+import TodayPage from "@/app/(app)/page";
 import HistoryPage from "@/app/(app)/history/page";
 import SettingsPage from "@/app/(app)/settings/page";
 import { saveMeal } from "@/app/(app)/log/actions";
 
 const item = { name: "Rice", grams: 100, calories: 200, protein_g: 1, carbs_g: 1, fat_g: 1 };
 const input = { id: crypto.randomUUID(), items: [item] };
+
+describe("Today", () => {
+  it("queries the 7-day window ending at the user's local today", async () => {
+    state.calls = [];
+    state.result = { data: [], error: null };
+    await TodayPage();
+    expect(state.calls).toContainEqual(["gte", "eaten_on", "2026-10-14"]);
+    expect(state.calls).toContainEqual(["lte", "eaten_on", "2026-10-20"]);
+  });
+
+  it("throws to error.tsx when loading fails, not an empty week", async () => {
+    state.result = { data: null, error: { code: "42501" } };
+    await expect(TodayPage()).rejects.toThrow();
+  });
+});
 
 describe("History", () => {
   it("caps the range at the user's local today", async () => {
