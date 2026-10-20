@@ -1,0 +1,156 @@
+Build it as a small, focused web app: Next.js + Supabase + Claude Vision. Claude Code can scaffold, implement the AI endpoint, build the UI, and help you deploy—provided you give it a precise stack, data model, and acceptance criteria.
+
+Recommended stack
+Layer	Choice	Why
+Frontend	Next.js App Router, TypeScript, Tailwind CSS	Mobile-first, fast to build, easy to deploy
+Auth + database	Supabase	Email/Google auth plus Postgres storage
+AI analysis	Anthropic Claude Vision via server API route	Estimates food items, calories, and macros from a photo
+Image handling	Client-side compression + base64 upload	Keeps uploads small and fast
+Hosting	GitHub + Vercel	Simple deployment with environment variables
+Optional monetization	Stripe Checkout	Controls free-tier AI usage and adds a paid plan
+A proven pattern is: user photographs a meal → a server endpoint sends the image to Claude Vision → Claude returns structured JSON → the user reviews/edits it → the app saves the meal and updates daily totals.
+
+1. Set up the project
+Install Claude Code, create an empty folder, then start it in your terminal:
+
+bash
+mkdir nutrition-tracker
+cd nutrition-tracker
+claude
+Paste a prompt that specifies the stack and schema rather than merely asking for “a nutrition app.” For example:
+
+text
+Build a Next.js 14 app called NutritionTracker using the App Router and TypeScript.
+
+Set up:
+- Tailwind CSS, mobile-first design
+- Supabase auth with email magic links
+- Supabase Postgres database
+- A meals table: id, user_id, image_url, items (jsonb), total_calories,
+  protein_g, carbs_g, fat_g, meal_type, created_at
+- A daily_targets table: user_id, calorie_target, protein_target,
+  carbs_target, fat_target
+- An API route at /api/analyze for later Claude Vision integration
+- A dashboard showing today’s calories, protein, carbs, and fat
+- A “Log meal” button that opens the camera or file picker
+
+Use environment variables for all secrets. Explain the folder structure
+when finished.
+This gives Claude Code the exact product boundary, database fields, and first screen to build.
+
+2. Add the database and auth
+Ask Claude Code to create the Supabase tables, row-level security policies, and authentication flow:
+
+text
+Create Supabase migrations for the meals and daily_targets tables.
+Enable row-level security so users can only read and write their own rows.
+Add email magic-link authentication and protect all app routes.
+Create a settings page where users can set daily calorie and macro targets.
+Keep nutrition values numeric and use JSONB for the individual food items, since a meal may contain several components with different portion sizes.
+
+3. Build the Claude Vision endpoint
+Create /api/analyze on the server so your Anthropic API key never reaches the browser. Ask Claude Code to force a structured response using tool use:
+
+text
+Implement /api/analyze.
+
+It receives a base64 food image and returns structured nutrition JSON.
+Use the Anthropic SDK and Claude Vision.
+
+Define a tool named log_nutrition with this schema:
+- items: array of { name, grams, calories }
+- total_calories: number
+- protein_g: number
+- carbs_g: number
+- fat_g: number
+- confidence: "high" | "medium" | "low"
+
+Tell Claude to estimate portions from visual cues, return its best estimate,
+and use confidence "low" when the image is ambiguous. Force the tool call.
+Handle invalid images, API errors, and rate limits. Never expose the API key
+to the client.
+Using a required tool schema makes Claude return machine-readable fields instead of prose, which prevents parsing bugs in the frontend.
+
+4. Create the meal-logging flow
+The core UX should be one short loop: snap → review → save.
+
+text
+Build the meal logging flow:
+
+1. Add a large “Snap meal” button using a file input with
+   capture="environment" for mobile.
+2. Compress the selected image client-side to under 1 MB, convert it to
+   base64, and POST it to /api/analyze.
+3. Show an “Analyzing your meal…” state.
+4. Display detected items, total calories, and a protein/carbs/fat bar.
+5. If confidence is low, show: “Rough estimate — tap any item to adjust.”
+6. Let the user edit item names, grams, calories, and macros.
+7. Add a “Log meal” button that saves the confirmed entry to Supabase
+   and refreshes today’s totals.
+Make estimates editable by default. AI nutrition estimates are useful for consistency, but they are not laboratory measurements; letting users correct them builds trust and improves the log.
+
+5. Add history and progress
+Once logging works, add the features that make the app useful over time:
+
+Daily dashboard with calories and macros remaining.
+
+Calendar/history view showing each day’s meals and totals.
+
+Weekly trend charts for calories, protein, and weight.
+
+Saved “pantry” foods with exact label macros for repeat meals.
+
+Barcode or nutrition-label photo scanning for packaged foods.
+
+Reminders or a daily summary, using the user’s local timezone.
+
+A nutrition-label or pantry feature is especially valuable: for foods the user has already verified, the app can reuse exact label values instead of relying on photo estimates.
+
+6. Test before deploying
+Ask Claude Code to write and run checks for the important paths:
+
+text
+Add tests and a QA checklist for:
+- Sign in and protected routes
+- Creating and updating daily targets
+- Uploading and analyzing an image
+- Editing and saving a meal
+- Daily totals calculating correctly across time zones
+- Users cannot access another user’s meals
+- API errors show a useful message instead of crashing
+Also test with difficult photos—mixed plates, partially hidden food, restaurant portions, and nutrition labels—then confirm the confidence flag and editing flow behave sensibly.
+
+7. Deploy safely
+Push the project to GitHub, connect it to Vercel, and add secrets in Vercel’s environment-variable settings:
+
+text
+ANTHROPIC_API_KEY=
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+Never commit .env files or expose the Anthropic key in client-side code. If you add photo analysis for public users, put a daily scan limit on the free tier; otherwise AI calls can quickly become your largest operating cost.
+
+Useful iteration prompts
+After the first version works, use small, testable prompts:
+
+text
+Add a weekly protein trend chart and let me log body weight from the dashboard.
+text
+Add a saved-foods pantry. When I photograph a nutrition label, extract
+serving size, calories, protein, carbs, and fat, let me confirm them,
+then reuse those exact values when I log that food later.
+text
+Add a free limit of five photo scans per user per day, reset at midnight
+in the user’s timezone. Show an upgrade screen when the limit is reached.
+Important guardrails
+Present photo-derived calories and macros as estimates, not medical or clinical facts.
+
+Let users edit every AI-generated entry before saving.
+
+Store only the health data you actually need, and avoid collecting medical records or other sensitive regulated data.
+
+Use server-side API routes for all model calls and database service operations.
+
+Start with one primary flow—photo logging and daily totals—before adding meal plans, social features, or wearables integration.
+
+For a first working version, aim for: auth, daily targets, photo/text meal logging, editable AI estimates, daily totals, and history. That is enough to use daily; everything else can be added one Claude Code prompt at a time.
