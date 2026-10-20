@@ -41,6 +41,7 @@ test("out-of-range values posted around the client show an inline error", async 
   await save(page, ["0", "150", "200", "70"]);
   await expect(page.locator("form").getByRole("alert")).toHaveText("Some values are out of range.");
   await expect(page.getByRole("status")).toHaveCount(0);
+  await expectValues(page, ["0", "150", "200", "70"]); // typed input is kept
 
   // The error does not survive the next successful submit.
   await save(page, ["1800", "150", "200", "70"]);

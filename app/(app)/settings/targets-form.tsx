@@ -32,7 +32,7 @@ export function TargetsForm({ initial }: { initial: Targets | null }) {
             required
             min={TARGET_LIMITS[name][0]}
             max={TARGET_LIMITS[name][1]}
-            defaultValue={initial?.[name]}
+            defaultValue={state?.values[name] ?? initial?.[name]}
             className="rounded border px-3 py-2"
           />
         </label>
