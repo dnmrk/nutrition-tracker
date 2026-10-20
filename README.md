@@ -2,6 +2,15 @@
 
 Photo-based meal and macro tracker. Next.js 16 (App Router), Supabase (auth and Postgres), Groq for meal photo analysis.
 
+## Screens
+
+A mobile column (100dvh, max 430px) with a bottom tab bar on every signed-in screen:
+
+- **Today** (`/`): a week strip for the last 7 days, where a dot marks days within 90–110% of the calorie target. Three macro rings (Protein, Carbs, Fat) with total kcal in the centre and a count-up legend. The selected day's meals. Switching days happens on the client with no refetch.
+- **Log** (`/log`): snap a meal photo, edit the AI estimate, save.
+- **History** (`/history`): past days.
+- **Settings** (`/settings`): daily targets and Sign out.
+
 ## Local development
 
 Prerequisites: Node 22.12+ and Docker (for the local Supabase stack).
@@ -40,7 +49,7 @@ These steps are not done by the Engineer or QA. Do them before merge and deploy.
   - in Settings → Data Controls, turn on **Zero Data Retention**, since meal photos would otherwise be loggable for up to 30 days;
   - in Settings → Limits, read the real free-tier RPM/RPD/TPM/TPD for `qwen/qwen3.8-27b` and record them in `README.md`. The plan's 30/1K/8K/200K figures come from the docs' Developer-plan base table;
   - watch Groq's deprecations page, because the model is in preview.
-- **H5** Create a GitHub remote (none exists) and push. Import it in Vercel. Set the env vars `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` and `GROQ_API_KEY` (server-only). **Do not add a service-role or secret key.** Check that the preview build succeeds (FC-02). Magic links always point to the Site URL, so sign-in on preview deployments isn't supported in the MVP.
+- **H5** Import the GitHub repo (`dnmrk/nutrition-tracker`) in Vercel. Set the env vars `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` and `GROQ_API_KEY` (server-only). **Do not add a service-role or secret key.** Check that the preview build succeeds (FC-02). Magic links always point to the Site URL, so sign-in on preview deployments isn't supported in the MVP.
 - **H6** Allow these if your permission settings prompt for them:
   - `npx supabase start`/`db reset`/`test db` (Docker);
   - `npx playwright install chromium` (downloads to `~/Library/Caches/ms-playwright`).
@@ -61,4 +70,5 @@ These steps are not done by the Engineer or QA. Do them before merge and deploy.
 - `meal_type` (breakfast/lunch/…) and stored `confidence`.
 - Google OAuth.
 - Sign-in on preview deployments.
-- A CI workflow (there is no remote yet).
+- A CI workflow.
+- Aligning the `/log` and `/settings` buttons with the theme tokens in `app/globals.css`.
