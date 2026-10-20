@@ -192,3 +192,123 @@ test("Rapid switching, row order, stagger and reduced motion", async ({ page }) 
   await dayButton(page, today).click();
   await expect(rows.first()).toHaveCSS("animation-name", "none");
 });
+
+const rings = (page: Page) => page.locator('[role="img"][aria-label*="kcal."]');
+const progress = (page: Page) => page.locator('[data-ring="progress"]');
+
+test("Rings and legend from saved meals", async ({ page }) => {
+  await signIn(page);
+  await setTargets(page, ["2000", "150", "200", "70"]);
+  await page.goto("/");
+  // D-3.6: an empty day with targets has hidden progress circles.
+  await expect(page.getByText("2000 kcal left")).toBeVisible();
+  for (const c of await progress(page).all()) await expect(c).toHaveCSS("opacity", "0");
+
+  await logMeal(page, [item("Rice", 72.4, 6.3, 0.4, 4.8)]);
+  await logMeal(page, [item("Toast", 195, 4, 42, 0.4)]);
+  const img = page.getByRole("img", { name: "267 kcal. Protein 10 of 150 g, Carbs 42 of 200 g, Fat 5 of 70 g" });
+  await expect(img).toBeVisible();
+  await expect(img.locator('svg[aria-hidden="true"]')).toHaveCount(1);
+  await expect(page.getByText("1733 kcal left")).toBeVisible();
+  for (const t of ["/ 150 g", "/ 200 g", "/ 70 g"]) await expect(page.getByText(t, { exact: true })).toBeVisible();
+  await expect(progress(page)).toHaveCount(3);
+  const offset = await progress(page).first().evaluate((el) => parseFloat(getComputedStyle(el).strokeDashoffset));
+  expect(Math.abs(offset - (1 - 10.3 / 150))).toBeLessThan(0.01);
+  await expect(page.locator('span[class*="26px"]').first()).toHaveCSS("font-size", "26px");
+  expect(await page.locator("button button, a a, a button, button a").count()).toBe(0);
+});
+
+test("Rounding agrees", async ({ page }) => {
+  await signIn(page);
+  await setTargets(page, ["2000", "150", "200", "70"]);
+  await logMeal(page, [item("Half", 200.5, 1, 1, 1)]);
+  await expect(rings(page)).toHaveAttribute("aria-label", /^201 kcal\./);
+  await expect(page.getByText("1799 kcal left")).toBeVisible();
+
+  await insertMeal(page, addDays(today, -1), [item("Feast", 2100, 1, 1, 1)]);
+  await page.goto("/");
+  await dayButton(page, addDays(today, -1)).click();
+  await expect(page.getByText("100 kcal over")).toBeVisible();
+});
+
+test("4-digit total stays inside the hole (D-3.3)", async ({ page }) => {
+  await signIn(page);
+  await insertMeal(page, today, [item("Big", 2345, 1, 1, 1)]);
+  await page.goto("/");
+  const num = page.getByText("2345", { exact: true });
+  await expect(num).toBeVisible();
+  expect((await num.boundingBox())!.width).toBeLessThanOrEqual(48);
+  const unit = (await page.getByText("kcal", { exact: true }).boundingBox())!;
+  const nb = (await num.boundingBox())!;
+  const top = Math.min(nb.y, unit.y);
+  const block = { x: nb.x, width: nb.width, y: top, height: Math.max(nb.y + nb.height, unit.y + unit.height) - top };
+  expect(block.height).toBeLessThanOrEqual(34);
+  const box = (await rings(page).boundingBox())!;
+  expect(Math.abs(block.x + block.width / 2 - (box.x + box.width / 2))).toBeLessThanOrEqual(1);
+  expect(Math.abs(block.y + block.height / 2 - (box.y + box.height / 2))).toBeLessThanOrEqual(1);
+});
+
+test("No targets", async ({ page }) => {
+  await signIn(page);
+  await logMeal(page, [item("Rice", 72.4, 6.3, 0.4, 4.8)]);
+  await expect(page.getByRole("img", { name: "72 kcal. Protein 6 g, Carbs 0 g, Fat 5 g. No targets set" })).toBeVisible();
+  await expect(progress(page)).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Set your daily targets" })).toHaveAttribute("href", "/settings");
+  await expect(page.getByText(/kcal (left|over)/)).toHaveCount(0);
+});
+
+test("Count-up and reduced motion", async ({ page, context }) => {
+  await signIn(page);
+  await setTargets(page, ["2000", "150", "200", "70"]);
+  await insertMeal(page, addDays(today, -1), [item("Steak", 500, 120, 0, 10)]);
+  await page.goto("/");
+  const sample = (p: Page) =>
+    p.evaluate(async (label) => {
+      const num = document.querySelector('span[class*="26px"]')!;
+      (document.querySelector(`button[aria-label="${label}"]`) as HTMLButtonElement).click();
+      const out: number[] = [];
+      const end = performance.now() + 400;
+      while (performance.now() < end) {
+        await new Promise(requestAnimationFrame);
+        out.push(Number(num.textContent));
+      }
+      return out;
+    }, label(addDays(today, -1)));
+
+  const samples = await sample(page);
+  expect(samples.some((v) => v > 0 && v < 120)).toBe(true);
+  await page.waitForTimeout(1000);
+  await expect(page.locator('span[class*="26px"]').first()).toHaveText("120");
+  const circle = progress(page).first();
+  await expect(circle).toHaveCSS("transition-duration", "1.1s");
+  await expect(circle).toHaveCSS("transition-timing-function", "cubic-bezier(0.32, 0.72, 0, 1)");
+  await expect(highlight(page)).toHaveCSS("transition-duration", "0.59s");
+  expect(await highlight(page).evaluate((el) => getComputedStyle(el).transitionTimingFunction)).toContain("linear(");
+
+  const reduced = await context.newPage();
+  await reduced.emulateMedia({ reducedMotion: "reduce" });
+  await reduced.goto("/");
+  const rs = await sample(reduced);
+  expect(rs.some((v) => v > 0 && v < 120)).toBe(false);
+  await expect(progress(reduced).first()).toHaveCSS("transition-duration", "0.2s");
+  for (const r of await reduced.getByRole("listitem").all()) await expect(r).toHaveCSS("animation-name", "none");
+});
+
+test("320x568 with large values, 390x844 side by side", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await signIn(page);
+  await setTargets(page, ["10000", "1000", "1000", "1000"]);
+  await logMeal(page, [item("x".repeat(80), 9999, 999, 999, 999)]);
+  const overflow = () => page.evaluate(() => document.documentElement.scrollWidth);
+  await expect(rings(page)).toBeVisible();
+  expect(await overflow()).toBeLessThanOrEqual(320);
+  const r = (await rings(page).boundingBox())!;
+  const legend = (await page.getByText("Protein", { exact: true }).boundingBox())!;
+  expect(legend.y).toBeGreaterThanOrEqual(r.y + r.height);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const r2 = (await rings(page).boundingBox())!;
+  const l2 = (await page.getByText("Protein", { exact: true }).boundingBox())!;
+  expect(l2.y).toBeLessThan(r2.y + r2.height);
+  expect(l2.x).toBeGreaterThanOrEqual(r2.x + r2.width);
+});
