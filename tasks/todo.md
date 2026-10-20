@@ -830,3 +830,44 @@ rollback;
 ## Open questions for the human
 
 none: both were answered by the human at plan approval (see Decided).
+
+## Review
+
+**Outcome:** done with open items, on branch `feat/nutrition-mvp` (base `3a8063c`). All 10 tasks passed QA, and the whole-branch QA passed on round 2.
+
+| Task | Model | QA verdict | Fix rounds |
+|---|---|---|---|
+| 1 Scaffold | haiku | PASS r1 | 0 |
+| 2 Supabase, migration, RLS | haiku | PASS r1 | 0 |
+| 3 Domain library | sonnet | PASS r3 | 2 (NUL/length/coerce; JSON-schema bounds) |
+| 4 Auth | sonnet | PASS r2 | 1 (Host-header open redirect, 500) |
+| 5 /api/analyze (Groq) | sonnet | PASS r2 | 1 (missing key and non-completion 500s, streaming cap) |
+| 6 Settings | sonnet | PASS r2 | 1 (typed values lost on failed submit) |
+| 7 Log meal | sonnet | PASS r2 | 1 (no timeout or Cancel) |
+| 8 Today | sonnet | PASS r2 | 1 (ambiguous alert locator, error copy, rounding) |
+| 9 History | sonnet | PASS r1 | 0 |
+| 10 Docs and gate | haiku | PASS r1 | 0 |
+| Whole branch | opus QA, then sonnet fix and sonnet re-QA | PASS r2 | 1 (verbatim copy, session-expired save, settings load error, History upper bound) |
+
+**Final gate** (real exit codes, all 0):
+- `npx supabase db reset`
+- `npm run db:test` (17/17)
+- `npm run lint`
+- `npm run typecheck`
+- `npm test` (74/74)
+- `npm run build`
+- `npx playwright test` (29/29, run twice)
+
+**Open Minor findings, ranked:**
+1. A 23505 on save is treated as success, so an edited retry after a lost response silently keeps the first version (`app/(app)/log/actions.ts`).
+2. History has no row limit, so PostgREST `max_rows=1000` truncates the oldest days without a notice.
+3. There's no `engines` field, although the README says Node 22.12+.
+4. `perplexity.txt` is stale: it mentions Anthropic and the service-role key.
+5. A signed-out GET with a `next-action` header gets Next's 307 plus a static shell. Nothing leaks; it could be tightened to POST only (`proxy.ts`).
+6. There's no regression e2e for the History 30-day edge or the future bound. They are covered by unit tests and runtime probes.
+
+**Not verified:**
+- H7: a real Groq call with a real photo.
+- Real-device camera and HEIC capture.
+- Screen-reader announcements on a device.
+- The final pass's AC-5.8 RED re-run, which the guard hook blocked. The Task 5 QA rounds verified it.
