@@ -16,7 +16,13 @@ export const TARGET_LIMITS = {
 const num = (k: keyof typeof ITEM_MAX) => z.number().min(0).max(ITEM_MAX[k]);
 
 export const MealItemSchema = z.object({
-  name: z.string().min(1).max(NAME_MAX).refine((s) => s.trim().length > 0),
+  // SQL: char_length(btrim(name)) between 1 and 80 (code points, spaces trimmed); NUL breaks the jsonb cast.
+  // Stricter than SQL on non-space whitespace (JS trim).
+  name: z
+    .string()
+    .refine((s) => !s.includes("\0"))
+    .refine((s) => s.trim().length > 0)
+    .refine((s) => [...s.replace(/^ +| +$/g, "")].length <= NAME_MAX),
   grams: num("grams"),
   calories: num("calories"),
   protein_g: num("protein_g"),
@@ -35,8 +41,13 @@ export const SaveMealSchema = z.object({
   items: z.array(MealItemSchema).min(1).max(MAX_ITEMS),
 });
 
+// Digits only: z.coerce alone turns "", " " and null into 0.
 const target = (k: keyof typeof TARGET_LIMITS) =>
-  z.coerce.number().int().min(TARGET_LIMITS[k][0]).max(TARGET_LIMITS[k][1]);
+  z
+    .unknown()
+    .refine((v) => /^\d+$/.test(String(v)))
+    .pipe(z.coerce.number())
+    .pipe(z.number().int().min(TARGET_LIMITS[k][0]).max(TARGET_LIMITS[k][1]));
 
 export const TargetsSchema = z.object({
   calorie_target: target("calorie_target"),

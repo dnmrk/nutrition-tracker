@@ -48,8 +48,18 @@ describe("MealItemSchema", () => {
     ["long name", { name: "x".repeat(81) }],
     ["null grams", { grams: null }],
     ["missing fat_g", { fat_g: undefined }],
+    ["NUL in name", { name: "a\u0000b" }],
+    ["81 code points", { name: "x".repeat(81) }],
+    ["81 emoji", { name: "😀".repeat(81) }],
   ])("rejects %s", (_, o) => {
     expect(MealItemSchema.safeParse(item(o)).success).toBe(false);
+  });
+});
+
+describe("MealItemSchema name semantics (match SQL char_length(btrim))", () => {
+  it("counts code points and ignores padding spaces", () => {
+    expect(MealItemSchema.safeParse(item({ name: "😀".repeat(80) })).success).toBe(true);
+    expect(MealItemSchema.safeParse(item({ name: " ".repeat(10) + "x".repeat(80) })).success).toBe(true);
   });
 });
 
@@ -71,6 +81,11 @@ describe("TargetsSchema", () => {
     { calorie_target: "0" },
     { protein_target_g: "1001" },
     { fat_target_g: "12.5" },
+    { protein_target_g: "" },
+    { carbs_target_g: " " },
+    { fat_target_g: null },
+    { protein_target_g: "1e3" },
+    { carbs_target_g: "-0" },
   ])("rejects %j", (o) => {
     expect(TargetsSchema.safeParse({ ...ok, ...o }).success).toBe(false);
   });
