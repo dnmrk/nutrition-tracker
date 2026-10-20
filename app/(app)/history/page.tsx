@@ -30,8 +30,10 @@ export default async function HistoryPage() {
           <section key={d.date} className="mb-6">
             <h2 className="text-lg font-semibold">{dayLabel.format(new Date(`${d.date}T00:00:00Z`))}</h2>
             <p>
-              {fmt(d.totals.calories)} kcal · P {fmt(d.totals.protein_g)} g · C {fmt(d.totals.carbs_g)} g · F{" "}
-              {fmt(d.totals.fat_g)} g
+              <span className="tabular-nums">{fmt(d.totals.calories)}</span> kcal · P{" "}
+              <span className="tabular-nums">{fmt(d.totals.protein_g)}</span> g · C{" "}
+              <span className="tabular-nums">{fmt(d.totals.carbs_g)}</span> g · F{" "}
+              <span className="tabular-nums">{fmt(d.totals.fat_g)}</span> g
             </p>
             <ul className="mt-2 flex flex-col gap-2">
               {d.meals.map((m) => (

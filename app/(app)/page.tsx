@@ -37,12 +37,18 @@ export default async function TodayPage() {
       <section className="mb-6">
         {t ? (
           <>
-            <p className="text-xl">{fmt(total.calories)} / {t.calorie_target} kcal</p>
-            <p>{left >= 0 ? `${left} kcal left` : `${-left} kcal over`}</p>
+            <p className="text-xl">
+              <span className="tabular-nums">{fmt(total.calories)} / {t.calorie_target}</span> kcal
+            </p>
+            <p>
+              <span className="tabular-nums">{Math.abs(left)}</span> kcal {left >= 0 ? "left" : "over"}
+            </p>
           </>
         ) : (
           <>
-            <p className="text-xl">{fmt(total.calories)} kcal</p>
+            <p className="text-xl">
+              <span className="tabular-nums">{fmt(total.calories)}</span> kcal
+            </p>
             <Link href="/settings" className="underline">Set your daily targets</Link>
           </>
         )}
@@ -53,7 +59,9 @@ export default async function TodayPage() {
           <div key={label}>
             <div className="flex justify-between">
               <span>{label}</span>
-              <span>{target === undefined ? `${fmt(eaten)} g` : `${fmt(eaten)} / ${target} g`}</span>
+              <span>
+                <span className="tabular-nums">{target === undefined ? fmt(eaten) : `${fmt(eaten)} / ${target}`}</span> g
+              </span>
             </div>
             {target !== undefined && (
               // shortcut: max=0 (a 0 g target) is clamped to 1, since <progress max=0> is invalid.
