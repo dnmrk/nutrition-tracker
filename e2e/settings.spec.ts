@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { signIn } from "./helpers/auth";
 
-const FIELDS = ["Calories", "Protein (g)", "Carbs (g)", "Fat (g)"];
+const FIELDS = ["Calories (kcal)", "Protein (g)", "Carbs (g)", "Fat (g)"];
 
 async function save(page: Page, values: string[]) {
   for (const [i, label] of FIELDS.entries()) await page.getByLabel(label).fill(values[i]);
@@ -15,6 +15,7 @@ async function expectValues(page: Page, values: string[]) {
 test("targets persist, prefill and upsert idempotently", async ({ page }) => {
   await signIn(page);
   await page.goto("/settings");
+  await expect(page.getByRole("heading", { name: "Daily targets" })).toBeVisible();
   await expectValues(page, ["", "", "", ""]);
 
   const values = ["2000", "150", "200", "70"];

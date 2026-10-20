@@ -30,6 +30,14 @@ const expectSameOrigin = (res: Response, to: string) => {
   expect(res.headers.get("location")).toBe(`http://app.test:3000${to}`);
 };
 
+describe("proxy and Server Actions", () => {
+  it("lets an anonymous Server Action POST through so it can return its own session error", async () => {
+    claims.value = null;
+    const res = await proxy(new NextRequest("http://app.test:3000/log", { method: "POST", headers: { "next-action": "abc" } }));
+    expect(res.status).toBe(200);
+  });
+});
+
 describe.each(hosts)("Host: %s", (host) => {
   it("proxy redirects anonymous users to the request origin", async () => {
     claims.value = null;

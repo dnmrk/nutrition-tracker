@@ -7,7 +7,7 @@ import { saveTargets, type TargetsState } from "./actions";
 type Targets = Record<keyof typeof TARGET_LIMITS, number>;
 
 const FIELDS = [
-  ["calorie_target", "Calories"],
+  ["calorie_target", "Calories (kcal)"],
   ["protein_target_g", "Protein (g)"],
   ["carbs_target_g", "Carbs (g)"],
   ["fat_target_g", "Fat (g)"],

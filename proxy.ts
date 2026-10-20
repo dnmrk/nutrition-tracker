@@ -41,8 +41,11 @@ export async function proxy(request: NextRequest) {
     return res;
   };
 
+  // Server Actions re-check auth themselves; redirecting their POST would hide a "session expired" error.
+  const isAction = request.headers.has("next-action");
   if (
     !data?.claims &&
+    !isAction &&
     path !== "/login" &&
     !path.startsWith("/auth/") &&
     !path.startsWith("/api/")

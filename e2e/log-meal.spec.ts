@@ -123,6 +123,21 @@ test("a stale analysis never overwrites a newer pick", async ({ page }) => {
   await expect(page.getByLabel("Food")).toHaveCount(1);
 });
 
+test("an expired session on save keeps the draft and offers sign-in", async ({ page }) => {
+  await mockAnalyze(page, analysis([item("Rice", 200)]));
+  await pick(page);
+  await page.getByLabel("Food").fill("Edited rice");
+  await page.context().clearCookies({ name: /^sb-/ });
+  for (let i = 0; i < 2; i++) {
+    await page.getByRole("button", { name: "Log meal" }).click();
+    const alert = page.locator("main").getByRole("alert");
+    await expect(alert).toContainText("Your session expired. Sign in again.");
+    await expect(alert.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
+  }
+  await expect(page).toHaveURL(/\/log$/);
+  await expect(page.getByLabel("Food")).toHaveValue("Edited rice");
+});
+
 test("out-of-range values posted around the client show the inline error", async ({ page }) => {
   await mockAnalyze(page, analysis([item("Rice", 200)]));
   await pick(page);
@@ -134,7 +149,7 @@ test("out-of-range values posted around the client show the inline error", async
     }),
   );
   await page.getByRole("button", { name: "Log meal" }).click();
-  await expect(page.locator("main").getByRole("alert")).toHaveText("Some values are out of range.");
+  await expect(page.locator("main").getByRole("alert")).toHaveText("Some values are out of range. Check each item and try again.");
   expect(await userMeals(page)).toHaveLength(0);
 });
 

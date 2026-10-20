@@ -28,12 +28,13 @@ const TIMED_OUT = "Photo analysis timed out. Try again or enter the meal manuall
 const CANCELLED = "Analysis cancelled.";
 // Server's Groq timeout is 30 s; stay a little above it.
 const ANALYZE_TIMEOUT_MS = 40_000;
-const SAVE_FAILED = "Couldn't save the meal. Try again.";
+const SAVE_FAILED = "Couldn't save your meal. Try again.";
 
 export function MealLogger() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [analyzeError, setAnalyzeError] = useState("");
   const [saveError, setSaveError] = useState("");
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [saving, startSaving] = useTransition();
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [confidence, setConfidence] = useState<string>("high");
@@ -138,6 +139,7 @@ export function MealLogger() {
   function submit(e: React.FormEvent) {
     e.preventDefault();
     setSaveError("");
+    setSessionExpired(false);
     const items = drafts.map((d) => ({
       name: d.name,
       grams: num(d.grams),
@@ -149,7 +151,10 @@ export function MealLogger() {
     startSaving(async () => {
       try {
         const res = await saveMeal({ id: mealId, items });
-        if (res?.error) setSaveError(res.error);
+        if (res?.error) {
+          setSaveError(res.error);
+          setSessionExpired(!!res.sessionExpired);
+        }
       } catch {
         setSaveError(SAVE_FAILED); // lost response: retry reuses mealId
       }
@@ -254,7 +259,20 @@ export function MealLogger() {
           <p>
             Total: {fmt(totals.calories)} kcal · P {fmt(totals.protein_g)} g · C {fmt(totals.carbs_g)} g · F {fmt(totals.fat_g)} g
           </p>
-          {saveError && <p role="alert">{saveError}</p>}
+          {saveError && (
+            <p role="alert">
+              {saveError}
+              {sessionExpired && (
+                // New tab so the draft in this one survives; then Log meal again.
+                <>
+                  {" "}
+                  <a href="/login" target="_blank" rel="noopener" className="underline">
+                    Sign in
+                  </a>
+                </>
+              )}
+            </p>
+          )}
           <div className="flex flex-wrap gap-2">
             <button type="submit" disabled={saving || drafts.length === 0} className="rounded bg-black px-4 py-2 text-white disabled:opacity-50 dark:bg-white dark:text-black">
               {saving ? "Saving…" : "Log meal"}

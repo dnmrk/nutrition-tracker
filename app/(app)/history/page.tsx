@@ -10,6 +10,7 @@ export default async function HistoryPage() {
     .from("meals")
     .select("id, eaten_on, logged_at, items")
     .gte("eaten_on", addDays(date, -29))
+    .lte("eaten_on", date) // same local "today" as the Today page; hides future-dated rows
     .order("eaten_on", { ascending: false })
     .order("logged_at", { ascending: false });
   if (error) throw new Error("Failed to load history");
