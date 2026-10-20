@@ -23,6 +23,11 @@ const num = (v: string) => (v.trim() === "" ? NaN : Number(v));
 
 const TOO_LARGE = "That photo is too large. Try another one.";
 const ANALYZE_FAILED = "Couldn't analyze the photo. Try again or enter the meal manually.";
+const UNREADABLE = "We couldn't read that photo. Use a JPEG, PNG or WebP photo.";
+const TIMED_OUT = "Photo analysis timed out. Try again or enter the meal manually.";
+const CANCELLED = "Analysis cancelled.";
+// Server's Groq timeout is 30 s; stay a little above it.
+const ANALYZE_TIMEOUT_MS = 40_000;
 const SAVE_FAILED = "Couldn't save the meal. Try again.";
 
 export function MealLogger() {
@@ -71,12 +76,17 @@ export function MealLogger() {
         blob.current = await compressImage(file);
         if (!stale()) setCanRetry(true);
       }
-    } catch {
-      return fail(TOO_LARGE);
+    } catch (err) {
+      return fail(err instanceof Error && err.message === "too-large" ? TOO_LARGE : UNREADABLE);
     }
     if (stale() || !blob.current) return;
     const body = new FormData();
     body.append("image", blob.current, "meal.jpg");
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      ctl.abort();
+    }, ANALYZE_TIMEOUT_MS);
     try {
       const res = await fetch("/api/analyze", { method: "POST", body, signal: ctl.signal });
       const data: unknown = await res.json().catch(() => null);
@@ -100,8 +110,17 @@ export function MealLogger() {
         parsed.data.confidence,
       );
     } catch {
-      fail(ANALYZE_FAILED);
+      fail(timedOut ? TIMED_OUT : ANALYZE_FAILED);
+    } finally {
+      clearTimeout(timer);
     }
+  }
+
+  function cancel() {
+    requestId.current++;
+    controller.current?.abort();
+    setAnalyzeError(CANCELLED);
+    setPhase("analyzeError");
   }
 
   function retake() {
@@ -159,9 +178,14 @@ export function MealLogger() {
       )}
 
       {phase === "analyzing" && (
-        <p role="status" aria-live="polite">
-          Analyzing your meal…
-        </p>
+        <>
+          <p role="status" aria-live="polite">
+            Analyzing your meal…
+          </p>
+          <button type="button" onClick={cancel} className="self-start rounded border px-4 py-2">
+            Cancel
+          </button>
+        </>
       )}
 
       {phase === "analyzeError" && (

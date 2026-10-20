@@ -151,3 +151,36 @@ test("no horizontal scroll at 320px with a long name", async ({ page }) => {
   await expect(page.getByLabel("Food")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
 });
+
+test("a hung analysis times out into the error state", async ({ page }) => {
+  await page.clock.install();
+  let hit = false;
+  await page.route("**/api/analyze", () => {
+    hit = true; // never responds
+  });
+  await pick(page);
+  await expect.poll(() => hit).toBe(true); // the client timer is armed before the fetch
+  await page.clock.fastForward(60_000);
+  await expect(page.locator("main").getByRole("alert")).toHaveText("Photo analysis timed out. Try again or enter the meal manually.");
+  await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Enter manually" })).toBeVisible();
+});
+
+test("Cancel leaves the analyzing state; a late response is ignored", async ({ page }) => {
+  let held: Route | undefined;
+  await page.route("**/api/analyze", (route) => {
+    held = route;
+  });
+  await pick(page);
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.locator("main").getByRole("alert")).toHaveText("Analysis cancelled.");
+  await held?.fulfill({ json: analysis([item("Late", 10)]) }).catch(() => {});
+  await expect(page.getByLabel("Food")).toHaveCount(0);
+  await page.getByRole("button", { name: "Enter manually" }).click();
+  await expect(page.getByLabel("Food")).toHaveValue("");
+});
+
+test("a non-image file gets an accurate message, not the too-large copy", async ({ page }) => {
+  await page.locator('input[type="file"]').setInputFiles({ name: "a.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
+  await expect(page.locator("main").getByRole("alert")).toHaveText("We couldn't read that photo. Use a JPEG, PNG or WebP photo.");
+});
