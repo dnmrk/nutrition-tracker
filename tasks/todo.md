@@ -865,6 +865,7 @@ none: both were answered by the human at plan approval (see Decided).
 | 8 Today | sonnet | PASS r2 | 1 (ambiguous alert locator, error copy, rounding) |
 | 9 History | sonnet | PASS r1 | 0 |
 | 10 Docs and gate | haiku | PASS r1 | 0 |
+| 11 Typography, IBM Plex Sans (short path, after the run) | haiku | PASS r1 | 0 |
 | Whole branch | opus QA, then sonnet fix and sonnet re-QA | PASS r2 | 1 (verbatim copy, session-expired save, settings load error, History upper bound) |
 
 **Final gate** (real exit codes, all 0):
