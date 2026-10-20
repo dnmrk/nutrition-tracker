@@ -85,4 +85,8 @@ describe("analyzeMeal errors", () => {
   it("500 -> 502", async () => {
     expect(await http(500)).toMatchObject({ ok: false, status: 502 });
   });
+  it("200 with a non-completion body -> 502", async () => {
+    expect(await run(() => new Response("<html>", { status: 200 })).result).toMatchObject({ ok: false, status: 502 });
+    expect(await run(() => json({})).result).toMatchObject({ ok: false, status: 502 });
+  });
 });

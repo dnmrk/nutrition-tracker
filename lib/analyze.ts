@@ -29,9 +29,8 @@ export async function analyzeMeal(
   client: Groq,
   image: { data: string; mediaType: (typeof IMAGE_TYPES)[number] },
 ): Promise<Result> {
-  let completion;
   try {
-    completion = await client.chat.completions.create({
+    const completion = await client.chat.completions.create({
       model: ANALYZE_MODEL,
       temperature: 0.2,
       max_completion_tokens: 2048,
@@ -53,24 +52,19 @@ export async function analyzeMeal(
         },
       ],
     });
+    // Any throw below (malformed 200 body, bad JSON) maps to 502 via mapError.
+    const choice = completion.choices[0];
+    if (choice?.finish_reason !== "stop" || !choice.message.content) return fail(502, ERRORS.upstream);
+    const raw: unknown = JSON.parse(choice.message.content);
+    if (raw && typeof raw === "object" && typeof (raw as { confidence?: unknown }).confidence === "string") {
+      const o = raw as { confidence: string };
+      o.confidence = o.confidence.toLowerCase();
+    }
+    const parsed = AnalysisSchema.safeParse(raw);
+    return parsed.success ? { ok: true, data: parsed.data } : fail(502, ERRORS.upstream);
   } catch (err) {
     return mapError(err);
   }
-
-  const choice = completion.choices[0];
-  if (choice?.finish_reason !== "stop" || !choice.message.content) return fail(502, ERRORS.upstream);
-  let raw: unknown;
-  try {
-    raw = JSON.parse(choice.message.content);
-  } catch {
-    return fail(502, ERRORS.upstream);
-  }
-  if (raw && typeof raw === "object" && typeof (raw as { confidence?: unknown }).confidence === "string") {
-    const o = raw as { confidence: string };
-    o.confidence = o.confidence.toLowerCase();
-  }
-  const parsed = AnalysisSchema.safeParse(raw);
-  return parsed.success ? { ok: true, data: parsed.data } : fail(502, ERRORS.upstream);
 }
 
 function mapError(err: unknown): Result {

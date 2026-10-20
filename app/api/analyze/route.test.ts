@@ -3,9 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const getClaims = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ auth: { getClaims } }) }));
 const analyzeMeal = vi.fn();
+const getGroqMock = vi.fn();
 vi.mock("@/lib/analyze", async (orig) => ({
   ...(await orig<typeof import("@/lib/analyze")>()),
-  getGroq: () => ({}),
+  getGroq: () => getGroqMock(),
   analyzeMeal: (...a: unknown[]) => analyzeMeal(...a),
 }));
 
@@ -22,6 +23,7 @@ const jpeg = (n = 10) => new File([new Uint8Array(n)], "a.jpg", { type: "image/j
 
 beforeEach(() => {
   vi.clearAllMocks();
+  getGroqMock.mockReturnValue({});
   getClaims.mockResolvedValue({ data: { claims: { sub: "u" } } });
 });
 
@@ -68,5 +70,41 @@ describe("POST /api/analyze", () => {
     const res = await post(form(jpeg()));
     expect(res.status).toBe(429);
     expect(await res.json()).toEqual({ error: "busy" });
+  });
+  it("502 when the Groq client cannot be built (missing key)", async () => {
+    const { getGroq } = await vi.importActual<typeof import("@/lib/analyze")>("@/lib/analyze");
+    vi.stubEnv("GROQ_API_KEY", "");
+    getGroqMock.mockImplementation(getGroq);
+    const res = await post(form(jpeg()));
+    vi.unstubAllEnvs();
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ error: "Couldn't analyze the photo. Try again or enter the meal manually." });
+  });
+  it("502 when analyzeMeal throws unexpectedly", async () => {
+    analyzeMeal.mockRejectedValue(new Error("secret"));
+    const res = await post(form(jpeg()));
+    expect(res.status).toBe(502);
+    expect(JSON.stringify(await res.json())).not.toContain("secret");
+  });
+  it("413 on a chunked body over the cap without content-length", async () => {
+    const chunk = new Uint8Array(500_000);
+    let sent = 0;
+    const body = new ReadableStream({
+      pull(c) {
+        if (sent++ < 10) c.enqueue(chunk);
+        else c.close();
+      },
+    });
+    const res = await POST(
+      new Request("http://localhost/api/analyze", {
+        method: "POST",
+        body,
+        headers: { "content-type": "multipart/form-data; boundary=x" },
+        // @ts-expect-error Node requires duplex for stream bodies
+        duplex: "half",
+      }),
+    );
+    expect(res.status).toBe(413);
+    expect(sent).toBeLessThan(10);
   });
 });
