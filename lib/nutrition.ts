@@ -22,7 +22,9 @@ export const MealItemSchema = z.object({
     .string()
     .refine((s) => !s.includes("\0"))
     .refine((s) => s.trim().length > 0)
-    .refine((s) => [...s.replace(/^ +| +$/g, "")].length <= NAME_MAX),
+    .refine((s) => [...s.replace(/^ +| +$/g, "")].length <= NAME_MAX)
+    // Bounds for z.toJSONSchema only; a real .max() would count UTF-16 units at runtime.
+    .meta({ minLength: 1, maxLength: NAME_MAX }),
   grams: num("grams"),
   calories: num("calories"),
   protein_g: num("protein_g"),

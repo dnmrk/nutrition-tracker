@@ -95,6 +95,12 @@ describe("AnalysisSchema", () => {
   it("converts to JSON schema", () => {
     expect(() => z.toJSONSchema(AnalysisSchema)).not.toThrow();
   });
+  it("emits name bounds for the model", () => {
+    const j = z.toJSONSchema(AnalysisSchema) as unknown as {
+      properties: { items: { items: { properties: { name: object } } } };
+    };
+    expect(j.properties.items.items.properties.name).toMatchObject({ minLength: 1, maxLength: 80 });
+  });
 });
 
 describe("groupByDay", () => {
