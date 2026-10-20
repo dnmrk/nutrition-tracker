@@ -16,7 +16,7 @@ import { POST as signout } from "@/app/auth/signout/route";
 
 const hosts = ["evil.com", "user@evil.com", "["];
 const req = (path: string, host: string, method = "GET") =>
-  new NextRequest(`http://127.0.0.1:3000${path}`, { method, headers: { host } });
+  new NextRequest(`http://app.test:3000${path}`, { method, headers: { host } });
 
 // Location must never carry an origin, whatever Host says.
 const expectRelative = (res: Response, status: number, to: string) => {
@@ -27,7 +27,7 @@ const expectRelative = (res: Response, status: number, to: string) => {
 // it must come from request.url, never from Host.
 const expectSameOrigin = (res: Response, to: string) => {
   expect(res.status).toBe(307);
-  expect(res.headers.get("location")).toBe(`http://127.0.0.1:3000${to}`);
+  expect(res.headers.get("location")).toBe(`http://app.test:3000${to}`);
 };
 
 describe.each(hosts)("Host: %s", (host) => {
