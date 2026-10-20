@@ -202,6 +202,7 @@ test("Rings and legend from saved meals", async ({ page }) => {
   await page.goto("/");
   // D-3.6: an empty day with targets has hidden progress circles.
   await expect(page.getByText("2000 kcal left")).toBeVisible();
+  await expect(progress(page)).toHaveCount(3);
   for (const c of await progress(page).all()) await expect(c).toHaveCSS("opacity", "0");
 
   await logMeal(page, [item("Rice", 72.4, 6.3, 0.4, 4.8)]);
@@ -212,6 +213,8 @@ test("Rings and legend from saved meals", async ({ page }) => {
   await expect(page.getByText("1733 kcal left")).toBeVisible();
   for (const t of ["/ 150 g", "/ 200 g", "/ 70 g"]) await expect(page.getByText(t, { exact: true })).toBeVisible();
   await expect(progress(page)).toHaveCount(3);
+  const radii = await page.locator("circle:not([data-ring])").evaluateAll((els) => els.map((e) => e.getAttribute("r")));
+  expect(radii).toEqual(["72", "53", "34"]);
   const offset = await progress(page).first().evaluate((el) => parseFloat(getComputedStyle(el).strokeDashoffset));
   expect(Math.abs(offset - (1 - 10.3 / 150))).toBeLessThan(0.01);
   await expect(page.locator('span[class*="26px"]').first()).toHaveCSS("font-size", "26px");
@@ -228,7 +231,7 @@ test("Rounding agrees", async ({ page }) => {
   await insertMeal(page, addDays(today, -1), [item("Feast", 2100, 1, 1, 1)]);
   await page.goto("/");
   await dayButton(page, addDays(today, -1)).click();
-  await expect(page.getByText("100 kcal over")).toBeVisible();
+  await expect(page.getByText("100 kcal over", { exact: true })).toBeVisible();
 });
 
 test("4-digit total stays inside the hole (D-3.3)", async ({ page }) => {
