@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { type Day, goalMet, lastSevenDays } from "./today";
 
 // Limits mirror supabase/migrations/20261020000000_nutrition_mvp.sql.
 export const MAX_IMAGE_BYTES = 1_500_000;
@@ -79,4 +80,48 @@ export function groupByDay<T extends { eaten_on: string; items: MealItem[] }>(me
     meals: ms,
     totals: sumItems(ms.flatMap((m) => m.items)),
   }));
+}
+
+// Server-only: formats with Intl, so the browser never sees raw rows or ICU output.
+export function buildWeek(
+  rows: { id: string; eaten_on: string; logged_at: string; items: MealItem[] }[],
+  today: string,
+  timeZone: string,
+  calorieTarget: number | null,
+): Day[] {
+  const byDate = new Map(groupByDay(rows).map((d) => [d.date, d]));
+  const weekday = new Intl.DateTimeFormat("en-US", { weekday: "narrow", timeZone: "UTC" });
+  const dayNumber = new Intl.DateTimeFormat("en-US", { day: "numeric", timeZone: "UTC" });
+  const longDate = new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+  const clock = new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit" });
+
+  return lastSevenDays(today).map((date) => {
+    const at = new Date(`${date}T00:00:00Z`);
+    const group = byDate.get(date);
+    const totals = group?.totals ?? { calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 };
+    const met = goalMet(totals.calories, calorieTarget);
+    return {
+      date,
+      weekday: weekday.format(at),
+      dayNumber: dayNumber.format(at),
+      label: `${longDate.format(at)}${met ? ", goal met" : ""}`,
+      totals,
+      goalMet: met,
+      meals: (group?.meals ?? []).map((m) => ({
+        id: m.id,
+        // Guard: a meal with no items must not crash the page.
+        initial: ([...(m.items[0]?.name.trim() ?? "")][0] ?? "?").toUpperCase(),
+        names: m.items.map((i) => i.name).join(", "),
+        itemCount: m.items.length,
+        kcal: Math.round(sumItems(m.items).calories),
+        time: clock.format(new Date(m.logged_at)),
+      })),
+    };
+  });
 }

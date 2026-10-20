@@ -5,6 +5,7 @@ import {
   MealItemSchema,
   SaveMealSchema,
   TargetsSchema,
+  buildWeek,
   fmt,
   groupByDay,
   sumItems,
@@ -110,5 +111,71 @@ describe("groupByDay", () => {
     expect(g.map((d) => [d.date, d.meals.length])).toEqual([["2026-10-20", 2], ["2026-10-19", 1]]);
     expect(g[0].totals.calories).toBeCloseTo(267.4);
     expect(g[1].totals.calories).toBe(195);
+  });
+});
+
+describe("buildWeek", () => {
+  const m1 = {
+    id: "m1",
+    eaten_on: "2026-10-20",
+    logged_at: "2026-10-19T23:30:00Z",
+    items: [
+      item({ name: "Rice", calories: 72.4, protein_g: 6.3, carbs_g: 0.4, fat_g: 4.8 }),
+      item({ name: "Toast", calories: 195, protein_g: 4, carbs_g: 42, fat_g: 0.4 }),
+    ],
+  };
+  const m2 = {
+    id: "m2",
+    eaten_on: "2026-10-18",
+    logged_at: "2026-10-18T04:05:00Z",
+    items: [item({ name: " oats", calories: 1900, protein_g: 0, carbs_g: 0, fat_g: 0 })],
+  };
+  const week = buildWeek([m1, m2], "2026-10-20", "Asia/Manila", 2000);
+
+  it("always returns seven days, oldest to newest, ending on today", () => {
+    expect(week).toHaveLength(7);
+    expect(week[0].date).toBe("2026-10-14");
+    expect(week[6].date).toBe("2026-10-20");
+  });
+
+  it("labels today's calendar date without tz drift", () => {
+    expect(week[6].weekday).toBe("T");
+    expect(week[6].dayNumber).toBe("20");
+    expect(week[6].label).toBe("Tuesday, October 20, 2026");
+  });
+
+  it("shapes today's meal rows in the user's zone", () => {
+    const meal = week[6].meals[0];
+    expect(week[6].meals).toHaveLength(1);
+    expect(meal.names).toBe("Rice, Toast");
+    expect(meal.itemCount).toBe(2);
+    expect(meal.kcal).toBe(267);
+    expect(meal.initial).toBe("R");
+    expect(meal.time).toMatch(/^7:30\sAM$/);
+  });
+
+  it("rounds day totals and marks goal-met only inside 90-110%", () => {
+    expect(week[6].totals.calories).toBeCloseTo(267.4);
+    expect(week[6].totals.protein_g).toBeCloseTo(10.3);
+    expect(week[6].totals.carbs_g).toBeCloseTo(42.4);
+    expect(week[6].totals.fat_g).toBeCloseTo(5.2);
+    expect(week[6].goalMet).toBe(false);
+    expect(week[4].goalMet).toBe(true);
+  });
+
+  it("labels a goal-met day and trims the initial", () => {
+    expect(week[4].label).toBe("Sunday, October 18, 2026, goal met");
+    expect(week[4].meals[0].initial).toBe("O");
+    expect(week[4].meals[0].names).toBe(" oats");
+  });
+
+  it("gives empty days zero totals and no meals", () => {
+    expect(week[0].totals).toEqual({ calories: 0, protein_g: 0, carbs_g: 0, fat_g: 0 });
+    expect(week[0].meals).toEqual([]);
+    expect(week[0].goalMet).toBe(false);
+  });
+
+  it("never marks goal met without a calorie target", () => {
+    expect(buildWeek([m2], "2026-10-20", "Asia/Manila", null)[4].goalMet).toBe(false);
   });
 });
