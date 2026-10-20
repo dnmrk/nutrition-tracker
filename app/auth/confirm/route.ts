@@ -1,6 +1,6 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { absoluteUrl } from "@/lib/origin";
+import { redirectTo } from "@/lib/redirect";
 
 // No `next` parameter on purpose: the destination is fixed (no open redirect).
 export async function GET(request: NextRequest) {
@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
       type: "email",
       token_hash: tokenHash,
     });
-    if (!error) return NextResponse.redirect(absoluteUrl(request, "/"));
+    if (!error) return redirectTo("/");
   }
-  return NextResponse.redirect(absoluteUrl(request, "/login?error=link"));
+  return redirectTo("/login?error=link");
 }

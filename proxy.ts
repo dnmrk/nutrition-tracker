@@ -1,6 +1,5 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { absoluteUrl } from "@/lib/origin";
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -30,7 +29,7 @@ export async function proxy(request: NextRequest) {
   const { data } = await supabase.auth.getClaims();
   const path = request.nextUrl.pathname;
   const redirectTo = (to: string) => {
-    const res = NextResponse.redirect(absoluteUrl(request, to));
+    const res = NextResponse.redirect(new URL(to, request.url));
     // Keep refreshed session cookies and cache headers on the redirect.
     refreshed.forEach(({ name, value, options }) =>
       res.cookies.set(name, value, options),
