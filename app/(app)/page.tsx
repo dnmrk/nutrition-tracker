@@ -18,7 +18,7 @@ export default async function TodayPage() {
   const total = sumItems(rows.flatMap((m) => m.items));
   const t = targets.data;
   const time = new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit" });
-  const left = t ? Math.round(t.calorie_target - total.calories) : 0;
+  const left = t ? t.calorie_target - Math.round(total.calories) : 0;
   const macros = [
     ["Protein", total.protein_g, t?.protein_target_g],
     ["Carbs", total.carbs_g, t?.carbs_target_g],

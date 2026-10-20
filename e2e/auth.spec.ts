@@ -16,7 +16,7 @@ test("magic-link sign-in lands on Today", async ({ page }) => {
 test("a bad link shows the invalid-link copy", async ({ page }) => {
   await page.goto("/auth/confirm?token_hash=bogus&type=email");
   await expect(page).toHaveURL("/login?error=link");
-  await expect(page.getByRole("alert")).toHaveText(
+  await expect(page.locator("main").getByRole("alert")).toHaveText(
     "That sign-in link is invalid or expired. Request a new one.",
   );
 });

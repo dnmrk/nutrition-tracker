@@ -53,6 +53,19 @@ test("totals, remaining and progress come from the saved meals", async ({ page }
   expect(await page.locator("button button, [role=button] [role=button], a a, a button, button a").count()).toBe(0);
 });
 
+test("kcal left agrees with the rounded eaten value", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/settings");
+  for (const [label, v] of [["Calories", "2000"], ["Protein (g)", "150"], ["Carbs (g)", "200"], ["Fat (g)", "70"]]) {
+    await page.getByLabel(label).fill(v);
+  }
+  await page.getByRole("button", { name: "Save targets" }).click();
+  await expect(page.getByRole("status")).toHaveText("Targets saved.");
+  await logMeal(page, [item("Rice", 200.5, 1, 1, 1)]);
+  await expect(page.getByText("201 / 2000 kcal")).toBeVisible();
+  await expect(page.getByText("1799 kcal left")).toBeVisible();
+});
+
 test("no horizontal scroll at 320px", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 568 });
   await signIn(page);
