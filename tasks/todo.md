@@ -389,3 +389,23 @@ All three **decided: human, 2026-10-20** — the recommended answers were approv
 ## Human-only steps
 
 - none for deploy: no migration, no env var, no dependency. After merge, Vercel redeploys from `main` as before.
+
+## Review
+
+**Outcome:** done with open items (device-only checks; `supabase db reset` not run). Branch `feat/today-macro-rings`, base `af343f8` (plan commit; `main` at `73bcf87`).
+
+| Task | Model | QA | Fix rounds |
+|---|---|---|---|
+| 1 Pure helpers | haiku | PASS r1 | 0 |
+| 2 `buildWeek` | haiku | PASS r1 | 0 |
+| 3 Theme/motion tokens, 700 weight | haiku | PASS r1 (AC-3.4 verified in Task 4 QA) | 0 |
+| 4 Mobile column, tab bar, Sign out on Settings | sonnet | PASS r1 | 0 |
+| 5 Today page, WeekStrip, MealList | sonnet | PASS r1 | 0 |
+| 6 MacroRings, legend, count-up | sonnet | BLOCKED r1 (RED run denied) → accepted by human, RED proof carried to final | 0 |
+| Final whole-branch | sonnet | FAIL r1 (I1 substring assertion) → PASS r2 | 1 (test-only, `a4ae2fc`) |
+
+**Files touched:** 23 files, +1027 / −134 (`git diff --stat af343f8..HEAD`). New: `app/(app)/{macro-rings,meal-list,tab-bar,today-days,today-screen,week-strip}.tsx`, `lib/today.ts`, `e2e/tab-bar.spec.ts`, `e2e/helpers/meals.ts`. Modified: `app/(app)/{layout,page,settings/page}.tsx`, `app/globals.css`, `app/layout.tsx`, `lib/nutrition.ts`, `lib/supabase/server.ts`, tests.
+
+**Commands (final QA r2, at `a4ae2fc`):** `npm run lint` exit 0 · `npm run typecheck` exit 0 · `npm test` 91 passed · `npm run build` exit 0 · `npm run e2e` 44 passed. Mutation proofs (FC-26) run in a scratch copy: 9/10 ring mutations RED at r1, the 3 survivors killed at r2.
+
+**Not run / not verified:** `npx supabase db reset` (permission denied; low impact, e2e seeds its own data). Device-only (FC-24): iOS Safari 100dvh, spring feel, Safari `pathLength` and round caps, dark mode on device, VoiceOver.
